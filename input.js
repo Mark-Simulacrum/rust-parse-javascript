@@ -4,5 +4,5 @@ function test() {
 	 * testing
 	 * multiline BlockComment
 	 */
-	return 1;
+	return this.foobar.TeSt;
 }
