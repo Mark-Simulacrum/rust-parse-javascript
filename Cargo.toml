@@ -1,6 +1,12 @@
 [package]
+authors = ["Mark Simulacrum <mark.simulacrum@gmail.com>"]
 name = "parsejs"
 version = "0.1.0"
-authors = ["Mark Simulacrum <mark.simulacrum@gmail.com>"]
 
 [dependencies]
+memchr = "0.1.7"
+
+[profile]
+
+[profile.release]
+debug = true

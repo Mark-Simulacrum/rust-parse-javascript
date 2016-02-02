@@ -1,5 +1,6 @@
 use std::str;
 use std::fmt;
+use memchr;
 
 #[derive(PartialEq, Eq)]
 pub struct Token<'a> {
@@ -59,41 +60,36 @@ enum State {
 
 fn tokenize_blackspace<'a>(input: &'a str) -> Vec<Token<'a>> {
     let mut tokens = Vec::with_capacity(input.len());
+    let bytes = input.as_bytes();
 
-    if is_keyword(input) {
-        tokens.push(Token::new(TokenType::Keyword, input));
-    } else {
-        let bytes = input.as_bytes();
-
-        let mut start_index = 0;
-        let mut state;
-        while start_index < bytes.len() {
-            if start_index != 0 {
-                tokens.push(Token::new(TokenType::Whitespace, ""));
-            }
-
-            let mut end_index = start_index + 1;
-            if is_id(bytes[start_index]) {
-                state = State::Identifier;
-                while end_index < bytes.len() && is_id(bytes[end_index]) {
-                    end_index += 1;
-                }
-            } else {
-                state = State::Unknown;
-            }
-
-            let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..end_index]) };
-            match state {
-                State::Unknown => {
-                    tokens.push(Token::new(TokenType::Blackspace, content));
-                },
-                State::Identifier => {
-                    tokens.push(Token::new(TokenType::Identifier, content));
-                }
-            }
-
-            start_index = end_index;
+    let mut start_index = 0;
+    let mut state;
+    while start_index < bytes.len() {
+        if start_index != 0 {
+            tokens.push(Token::new(TokenType::Whitespace, ""));
         }
+
+        let mut end_index = start_index + 1;
+        if is_id(bytes[start_index]) {
+            state = State::Identifier;
+            while end_index < bytes.len() && is_id(bytes[end_index]) {
+                end_index += 1;
+            }
+        } else {
+            state = State::Unknown;
+        }
+
+        let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..end_index]) };
+        match state {
+            State::Unknown => {
+                tokens.push(Token::new(TokenType::Blackspace, content));
+            },
+            State::Identifier => {
+                tokens.push(Token::new(TokenType::Identifier, content));
+            }
+        }
+
+        start_index = end_index;
     }
 
     tokens
@@ -103,56 +99,62 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
     let bytes = input.as_bytes();
     let mut tokens = Vec::new();
 
-    let mut line_comment_starts: Vec<usize> = input.match_indices("//").map(|(i, _)| i).collect();
-    let mut block_comment_starts: Vec<usize> = input.match_indices("/*").map(|(i, _)| i).collect();
-
     let mut start_index = 0;
     let mut state = TokenizerType::Whitespace;
     while start_index < bytes.len() {
         let mut end_index = start_index;
 
-        if bytes[start_index] == b'/' {
-            if line_comment_starts.len() > 0 && line_comment_starts[0] == start_index {
-                line_comment_starts.remove(0);
+        if start_index + 1 < bytes.len() && bytes[start_index] == b'/'
+            && (bytes[start_index + 1] == b'/' || bytes[start_index + 1] == b'*') {
+            if bytes[start_index + 1] == b'/' {
                 state = TokenizerType::LineComment;
-            } else if block_comment_starts.len() > 0 && block_comment_starts[0] == start_index {
-                block_comment_starts.remove(0);
+                end_index = end_index + memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
+            } else if bytes[start_index + 1] == b'*' {
+                end_index += 1; // Increment since we can guarantee it's at least one more
                 state = TokenizerType::BlockComment;
-            }
-        }
+                loop {
+                    let next_position = memchr::memchr(b'/', &bytes[end_index..]);
+                    if let Some(pos) = next_position {
+                        let star_pos = end_index + pos - 1; // Right before the found slash
 
-        while end_index < bytes.len() {
-            if state == TokenizerType::LineComment {
-                if bytes[end_index] == b'\n' {
-                    break;
+                        if bytes[star_pos] == b'*' {
+                            end_index = end_index + pos + 1;
+                            break;
+                        } else {
+                            end_index += 1; // Didn't find it here, try again.
+                        }
+                    } else {
+                        end_index = bytes.len() - 1;
+                        break;
+                    }
                 }
-            } else if state == TokenizerType::BlockComment {
-                if end_index + 1 < bytes.len() && bytes[end_index] == b'*' && bytes[end_index + 1] == b'/' {
-                    end_index += 2; // We want to include the slash
-                    break;
-                }
-            } else {
+            }
+        } else {
+            while end_index < bytes.len() {
                 let is_whitespace = (bytes[end_index] as char).is_whitespace();
 
                 if (state == TokenizerType::Whitespace) != is_whitespace {
                     break;
                 }
-            }
 
-            end_index += 1;
+                end_index += 1;
+            }
         }
 
         assert!(start_index < bytes.len(), "Start index is within range.");
         assert!(end_index <= bytes.len(), "End index is within range.");
 
         let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..end_index]) };
-        start_index = end_index;
         match state {
             TokenizerType::Whitespace => {
                 tokens.push(Token::new(TokenType::Whitespace, content));
             },
             TokenizerType::Blackspace => {
-                tokens.append(&mut tokenize_blackspace(content));
+                if is_keyword(content) {
+                    tokens.push(Token::new(TokenType::Keyword, content));
+                } else {
+                    tokens.append(&mut tokenize_blackspace(content));
+                }
             },
             TokenizerType::LineComment => {
                 tokens.push(Token::new(TokenType::LineComment, content));
@@ -167,6 +169,8 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
         } else {
             TokenizerType::Whitespace
         };
+
+        start_index = end_index;
     }
 
     tokens
@@ -177,48 +181,56 @@ mod bench {
     use super::*;
     use test::Bencher;
 
-    #[bench]
-    fn tokenize_function(b: &mut Bencher) {
-        b.iter(|| tokenize("function () {}"));
+    macro_rules! _benchmark {
+        ($name: ident, $toRun: expr) => (
+            #[bench]
+            fn $name(b: &mut Bencher) {
+                b.iter(|| $toRun);
+            }
+        );
     }
 
-    #[bench]
-    fn tokenize_ident(b: &mut Bencher) {
-        b.iter(|| tokenize("$_very_Z_complex$$ident"));
+    macro_rules! benchmark_tokenize_blackspace {
+        ($name: ident, $toRun: expr) => (
+            _benchmark!($name, super::tokenize_blackspace($toRun));
+        )
     }
 
-    #[bench]
-    fn tokenize_blackspace_ident(b: &mut Bencher) {
-        b.iter(|| super::tokenize_blackspace("$_very_Z_complex$$ident"));
+    macro_rules! benchmark_tokenize {
+        ($name: ident, $toRun: expr) => (
+            _benchmark!($name, tokenize($toRun));
+        )
     }
 
-    #[bench]
-    fn tokenize_comment_line(b: &mut Bencher) {
-        b.iter(|| tokenize("// testing"));
+    mod tokenize {
+        use test::Bencher;
+        use super::super::{tokenize};
+
+        benchmark_tokenize!(function, "function test() {}");
+        benchmark_tokenize!(keyword, "function");
+        benchmark_tokenize!(empty, "");
+        benchmark_tokenize!(space, " ");
+        benchmark_tokenize!(comment_line, "// testing");
+        benchmark_tokenize!(comment_block, "/* testi*/");
+        benchmark_tokenize!(comment_long_block, "/* testitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitesti*/");
+        benchmark_tokenize!(sample, include_str!("../input.js"));
     }
 
-    #[bench]
-    fn tokenize_comment_block(b: &mut Bencher) {
-        b.iter(|| tokenize("/* testi*/")); // This is the same length as the line comment
-    }
 
-    #[bench]
-    fn tokenize_sample(b: &mut Bencher) {
-        let input = "function test() {
-        	// test
-        	/*
-        	 * testing
-        	 * multiline BlockComment
-        	 */
-        	return this.foobar.TeSt;
-        }";
-        b.iter(|| tokenize(input));
-    }
+    benchmark_tokenize!(tokenize_ident, "$_very_Z_complex$$ident");
+    benchmark_tokenize_blackspace!(tokenize_ident_blackspace, "$_very_Z_complex$$ident");
 }
 
 #[cfg(test)]
 mod tests {
     use super::{tokenize, Token, TokenType};
+
+    #[test]
+    fn tokenize_line_comment() {
+        let mut tokens = tokenize("// test");
+        assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// test"));
+        assert_eq!(tokens.len(), 0);
+    }
 
     #[test]
     fn tokenize_sample() {
@@ -260,5 +272,8 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "TeSt"));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Blackspace, ";"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n        "));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Blackspace, "}"));
+        assert_eq!(tokens.len(), 0);
     }
 }

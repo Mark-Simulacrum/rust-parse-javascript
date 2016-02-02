@@ -1,6 +1,7 @@
 #![feature(test)]
 
 extern crate test;
+extern crate memchr;
 
 use std::env;
 use std::fs::File;
