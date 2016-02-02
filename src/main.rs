@@ -19,12 +19,7 @@ use tokenizer::tokenize;
 fn main() {
     for argument in env::args().skip(1) {
         let content = &get_file_content(argument).unwrap();
-        println!("Started tokenization!");
         let tokens = tokenize(content);
-        println!("Tokenized!");
-        // for token in &tokens {
-        //     println!("{:?}", token);
-        // }
-        println!("{:#?}", tokens.len());
+        println!("Token amount: {:#?}", tokens.len());
     }
 }
