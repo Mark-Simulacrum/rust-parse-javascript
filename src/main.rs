@@ -7,7 +7,7 @@ use std::env;
 use std::fs::File;
 use std::io::Read;
 
-fn get_file_content(arg: String) -> std::io::Result<String> {
+fn get_file_content(arg: &str) -> std::io::Result<String> {
     let mut content = String::new();
     let mut file = try!(File::open(arg));
     try!(file.read_to_string(&mut content));
@@ -19,8 +19,14 @@ use tokenizer::tokenize;
 
 fn main() {
     for argument in env::args().skip(1) {
-        let content = &get_file_content(argument).unwrap();
+        let content = &get_file_content(&argument).unwrap_or(argument);
         let tokens = tokenize(content);
-        println!("Token amount: {:#?}", tokens.len());
+        if tokens.len() < 20 {
+            for token in tokens {
+                println!("{:?}", token);
+            }
+        } else {
+            println!("Token amount: {:#?}", tokens.len());
+        }
     }
 }

@@ -2,28 +2,12 @@ use std::str;
 use std::fmt;
 use memchr;
 
-#[derive(PartialEq, Eq)]
-pub struct Token<'a> {
-    ty: TokenType,
-    value: &'a str
-}
-
-impl<'a> Token<'a> {
-    fn new(ty: TokenType, value: &'a str) -> Self {
-        Token { ty: ty, value: value }
-    }
-}
-
-impl<'a> fmt::Debug for Token<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}Token: {:?}", self.ty, self.value)
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum TokenizerType {
     Whitespace,
     StringLiteral,
+    RegexLiteral,
+    TemplateLiteral,
     Blackspace,
     LineComment,
     BlockComment
@@ -32,6 +16,7 @@ enum TokenizerType {
 #[derive(Debug, PartialEq, Eq)]
 enum TokenType {
     Whitespace,
+    Shebang,
     Keyword,
     Identifier,
     NumericLiteral,
@@ -43,6 +28,7 @@ enum TokenType {
     BitwiseOr,
     BitwiseXOR,
     BitwiseAnd,
+    BitwiseNot,
     Equality,
     Relational,
     BitShift,
@@ -62,12 +48,47 @@ enum TokenType {
     QuestionMark,
     Colon,
     ExclamationMark,
-    Blackspace,
+    RegexLiteral,
     LineComment,
-    BlockComment
+    BlockComment,
+    TemplateLiteral
 }
 
-#[inline]
+impl TokenType {
+    fn before_expression(&self) -> bool {
+        match *self {
+            TokenType::LeftBracket | TokenType::LeftBrace | TokenType::LeftParen |
+            TokenType::Comma | TokenType::Semicolon | TokenType::Colon | TokenType::QuestionMark |
+            TokenType::Equal =>
+                true,
+            _ => false
+        }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+pub struct Token<'a> {
+    ty: TokenType,
+    value: &'a str
+}
+
+impl<'a> Token<'a> {
+    fn new(ty: TokenType, value: &'a str) -> Self {
+        Token { ty: ty, value: value }
+    }
+
+    fn before_expression(&self) -> bool {
+        self.ty.before_expression()
+    }
+}
+
+impl<'a> fmt::Debug for Token<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}Token: {:?}", self.ty, self.value)
+    }
+}
+
+
 fn is_id(c: u8) -> bool {
     (c as char).is_alphabetic() ||
     c == b'$' ||
@@ -115,13 +136,16 @@ fn is_keyword(s: &str) -> bool {
 
 fn is_num(c: u8) -> bool {
     // 100 and 10e10 are both valid numbers
-    (c as char).is_numeric() || c == b'e'
+    (c as char).is_numeric() || c == b'e' || c == b'E'
 }
 
+#[derive(PartialEq, Eq)]
 enum BlackspaceState {
     Unknown,
     Identifier,
     StringLiteral,
+    TemplateLiteral,
+    RegexLiteral,
     Number
 }
 
@@ -129,18 +153,57 @@ fn find_string_literal(bytes: &[u8], start_index: usize) -> usize {
     let mut ignore_next = true;
     let mut end_index = start_index;
     while end_index < bytes.len() {
-        if bytes[end_index] == b'"' && !ignore_next {
+        if (bytes[end_index] == b'"' || bytes[end_index] == b'\'') && !ignore_next {
             end_index += 1;
             break;
         }
-        ignore_next = bytes[end_index] == b'\\';
+        ignore_next = !ignore_next && bytes[end_index] == b'\\';
         end_index += 1;
     }
 
     end_index
 }
 
-fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
+fn find_template_string_literal<'a>(bytes: &[u8], start_index: usize) -> usize {
+    let mut ignore_next = true;
+    let mut end_index = start_index;
+    while end_index < bytes.len() {
+        if bytes[end_index] == b'`' && !ignore_next {
+            end_index += 1;
+            break;
+        }
+        ignore_next = !ignore_next && bytes[end_index] == b'\\';
+        end_index += 1;
+    }
+
+    end_index
+}
+
+fn find_regex_literal(bytes: &[u8], start_index: usize) -> usize {
+    let mut end_index = start_index;
+
+    let mut ignore_next = true;
+    while end_index < bytes.len() {
+        if bytes[end_index] == b'/' && !ignore_next {
+            end_index += 1;
+            break;
+        }
+        ignore_next = !ignore_next && bytes[end_index] == b'\\';
+        end_index += 1;
+    }
+
+    while end_index < bytes.len() && !(bytes[end_index] as char).is_whitespace() {
+        end_index += 1;
+    }
+
+    end_index
+}
+
+fn previous_non_whitespace_token<'a>(tokens: &'a Vec<Token>) -> Option<&'a Token<'a>> {
+    tokens.iter().rev().find(|x| x.ty != TokenType::Whitespace)
+}
+
+fn tokenize_blackspace<'a>(input: &'a str, prev_token: Option<&Token>, position: usize) -> Vec<Token<'a>> {
     let mut tokens = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
 
@@ -162,10 +225,18 @@ fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
             while end_index < bytes.len() && is_num(bytes[end_index]) {
                 end_index += 1;
             }
-        } else if bytes[start_index] == b'"' {
+        } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
             state = BlackspaceState::StringLiteral;
 
             end_index = find_string_literal(&bytes, end_index);
+        } else if bytes[start_index] == b'/' &&
+            prev_token.map_or(true, |tok| tok.before_expression()) {
+                state = BlackspaceState::RegexLiteral;
+                end_index = find_regex_literal(&bytes, end_index);
+        } else if bytes[start_index] == b'`' {
+            state = BlackspaceState::TemplateLiteral;
+            end_index = find_template_string_literal(&bytes, end_index);
+            // tokens.append(&mut tokenize_template_string_literal(&bytes[start_index..end_index]));
         } else {
             state = BlackspaceState::Unknown;
         }
@@ -176,6 +247,7 @@ fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
                 let ty = match content {
                     "=" => TokenType::Equal,
                     "==" | "!=" => TokenType::Equality,
+                    ";" => TokenType::Semicolon,
                     "++" | "--" => TokenType::DeIncrement,
                     "||" => TokenType::LogicalOr,
                     "&&" => TokenType::LogicalAnd,
@@ -188,7 +260,6 @@ fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
                     "%" => TokenType::Modulo,
                     "*" => TokenType::Star,
                     "/" => TokenType::Slash,
-                    ";" => TokenType::Semicolon,
                     "(" => TokenType::LeftParen,
                     ")" => TokenType::RightParen,
                     "{" => TokenType::LeftBrace,
@@ -200,12 +271,9 @@ fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
                     ":" => TokenType::Colon,
                     "?" => TokenType::QuestionMark,
                     "!" => TokenType::ExclamationMark,
-                    _ => TokenType::Blackspace
+                    "~" => TokenType::BitwiseNot,
+                    _ => panic!("Unknown Blackspace Token \"{}\" at {},", content, position)
                 };
-
-                // if ty == TokenType::Blackspace {
-                //     println!("{:?} @ {} - {}", content, pos + start_index, pos + end_index);
-                // }
 
                 tokens.push(Token::new(ty, content));
             },
@@ -217,6 +285,12 @@ fn tokenize_blackspace<'a>(input: &'a str, pos: usize) -> Vec<Token<'a>> {
             },
             BlackspaceState::StringLiteral => {
                 tokens.push(Token::new(TokenType::StringLiteral, content));
+            },
+            BlackspaceState::RegexLiteral => {
+                tokens.push(Token::new(TokenType::RegexLiteral, content));
+            },
+            BlackspaceState::TemplateLiteral => {
+                tokens.push(Token::new(TokenType::TemplateLiteral, content));
             }
         }
 
@@ -231,6 +305,13 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
     let mut tokens = Vec::new();
 
     let mut start_index = 0;
+
+    if bytes.len() >= 2 && bytes[start_index] == b'#' && bytes[start_index + 1] == b'!' {
+        let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
+        let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..nearest_newline]) };
+        tokens.push(Token::new(TokenType::Shebang, content));
+        start_index += content.len();
+    }
 
     let mut state = TokenizerType::Whitespace;
     while start_index < bytes.len() {
@@ -261,7 +342,7 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
                     }
                 }
             }
-        } else if bytes[start_index] == b'"' {
+        } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
             if state == TokenizerType::Whitespace {
                 tokens.push(Token::new(TokenType::Whitespace, ""));
             }
@@ -269,6 +350,18 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
             state = TokenizerType::StringLiteral;
 
             end_index = find_string_literal(&bytes, end_index);
+        } else if bytes[start_index] == b'/' &&
+            previous_non_whitespace_token(&tokens).map_or(true, |tok| tok.before_expression()) {
+                if state == TokenizerType::Whitespace {
+                    tokens.push(Token::new(TokenType::Whitespace, ""));
+                }
+
+                state = TokenizerType::RegexLiteral;
+
+                end_index = find_regex_literal(&bytes, end_index);
+        } else if bytes[start_index] == b'`' {
+            state = TokenizerType::TemplateLiteral;
+            end_index = find_template_string_literal(&bytes, end_index);
         } else {
             while end_index < bytes.len() {
                 let is_whitespace = (bytes[end_index] as char).is_whitespace();
@@ -293,7 +386,10 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
                 if is_keyword(content) {
                     tokens.push(Token::new(TokenType::Keyword, content));
                 } else {
-                    tokens.append(&mut tokenize_blackspace(content, start_index));
+                    let mut to_append = {
+                        tokenize_blackspace(content, previous_non_whitespace_token(&tokens), start_index)
+                    };
+                    tokens.append(&mut to_append);
                 }
             },
             TokenizerType::LineComment => {
@@ -304,6 +400,12 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
             },
             TokenizerType::StringLiteral => {
                 tokens.push(Token::new(TokenType::StringLiteral, content));
+            },
+            TokenizerType::RegexLiteral => {
+                tokens.push(Token::new(TokenType::RegexLiteral, content));
+            },
+            TokenizerType::TemplateLiteral => {
+                tokens.push(Token::new(TokenType::TemplateLiteral, content));
             }
         };
 
@@ -316,7 +418,7 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
         start_index = end_index;
     }
 
-    if state == TokenizerType::Blackspace {
+    if tokens.len() > 0 && tokens.last().unwrap().ty != TokenType::Whitespace {
         tokens.push(Token::new(TokenType::Whitespace, ""));
     }
 
@@ -373,9 +475,34 @@ mod tests {
     use super::{tokenize, Token, TokenType};
 
     #[test]
+    fn tokenize_shebang() {
+        let mut tokens = tokenize("#! testing");
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Shebang, "#! testing"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_template_literal_with_expression() {
+        let mut tokens = tokenize("`test${test}test`");
+        assert_eq!(tokens.remove(0), Token::new(TokenType::TemplateLiteral, "`test${test}test`"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
     fn tokenize_line_comment() {
         let mut tokens = tokenize("// test");
         assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// test"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_line_comment_complex() {
+        let mut tokens = tokenize("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters");
+        assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -384,6 +511,7 @@ mod tests {
         let mut tokens = tokenize("\"\"");
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"\""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -392,6 +520,27 @@ mod tests {
         let mut tokens = tokenize("\"test foobar\"");
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"test foobar\""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_normal_regex() {
+        let mut tokens = tokenize(r#"/(=)\?(?=&|$) |\?\?/"#);
+        println!("{:?}", tokens);
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::RegexLiteral, r#"/(=)\?(?=&|$) |\?\?/"#));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_modified_regex() {
+        let mut tokens = tokenize("/te st/mgi");
+        println!("{:?}", tokens);
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::RegexLiteral, "/te st/mgi"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -400,6 +549,7 @@ mod tests {
         let mut tokens = tokenize("\"\n\"");
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"\n\""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -408,6 +558,7 @@ mod tests {
         let mut tokens = tokenize(r#""\"""#);
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, r#""\"""#));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -420,6 +571,7 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, r#""auto""#));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::RightParen, ")"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -432,6 +584,7 @@ mod tests {
              * multiline BlockComment
              */
             return this.foobar.TeSt;
+            `test`;
         }";
         let mut tokens = tokenize(input);
         println!("{:?}", tokens);
@@ -463,8 +616,13 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "TeSt"));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Semicolon, ";"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n            "));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::TemplateLiteral, "`test`"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Semicolon, ";"));
         assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n        "));
         assert_eq!(tokens.remove(0), Token::new(TokenType::RightBrace, "}"));
+        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
         assert_eq!(tokens.len(), 0);
     }
 }
