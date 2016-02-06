@@ -1,4 +1,7 @@
 #![feature(test)]
+#![feature(plugin)]
+
+#![plugin(clippy)]
 
 extern crate test;
 extern crate memchr;

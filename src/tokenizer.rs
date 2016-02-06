@@ -125,16 +125,6 @@ fn is_num(c: u8) -> bool {
     (c as char).is_numeric() || c == b'e' || c == b'E'
 }
 
-#[derive(PartialEq, Eq)]
-enum BlackspaceState {
-    Unknown,
-    Identifier,
-    StringLiteral,
-    TemplateLiteral,
-    RegexLiteral,
-    Number
-}
-
 fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usize {
     let mut ignore_next = true;
     let mut end_index = start_index;
@@ -150,7 +140,7 @@ fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usiz
     end_index
 }
 
-fn find_template_string_literal<'a>(bytes: &[u8], start_index: usize) -> usize {
+fn find_template_string_literal(bytes: &[u8], start_index: usize) -> usize {
     let mut ignore_next = true;
     let mut end_index = start_index;
     while end_index < bytes.len() {
@@ -218,12 +208,11 @@ fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
 
-fn tokenize_blackspace<'a, 'b>(input: &'a str, position: usize, is_possible_expression: bool) -> Vec<Token<'a>> {
+fn tokenize_blackspace(input: &str, position: usize, is_possible_expression: bool) -> Vec<Token> {
     let mut tokens = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
-    let mut state;
     while start_index < bytes.len() {
         if start_index != 0 {
             tokens.push(Token::Whitespace(""));
@@ -231,78 +220,56 @@ fn tokenize_blackspace<'a, 'b>(input: &'a str, position: usize, is_possible_expr
 
         let mut end_index = start_index + 1;
         if is_id(bytes[start_index]) {
-            state = BlackspaceState::Identifier;
-
             while end_index < bytes.len() && is_id(bytes[end_index]) {
                 end_index += 1;
             }
+
+            tokens.push(Token::Identifier(as_str(&bytes[start_index..end_index])));
         } else if is_num(bytes[start_index]) {
-            state = BlackspaceState::Number;
             while end_index < bytes.len() && is_num(bytes[end_index]) {
                 end_index += 1;
             }
+
+            tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
         } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
-            state = BlackspaceState::StringLiteral;
-
             end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
+
+            tokens.push(Token::StringLiteral(as_str(&bytes[start_index..end_index])));
         } else if bytes[start_index] == b'/' && is_possible_expression {
-                state = BlackspaceState::RegexLiteral;
-                end_index = find_regex_literal(&bytes, end_index);
+            end_index = find_regex_literal(&bytes, end_index);
+
+            tokens.push(Token::RegexLiteral(as_str(&bytes[start_index..end_index])));
         } else if bytes[start_index] == b'`' {
-            state = BlackspaceState::TemplateLiteral;
             end_index = find_template_string_literal(&bytes, end_index);
+
+            tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
         } else {
-            state = BlackspaceState::Unknown;
-        }
+            if end_index < bytes.len() {
+                let curr = bytes[start_index];
+                let next = bytes[end_index];
 
-        match state {
-            BlackspaceState::Unknown => {
-                if end_index < bytes.len() {
-                    let curr = bytes[start_index];
-                    let next = bytes[end_index];
-
-                    if curr == b'=' && next == b'=' {
-                        tokens.push(Token::Equality("=="));
-                    } else if curr == b'!' && next == b'=' {
-                        tokens.push(Token::Equality("!="));
-                    } else if curr == b'+' && next == b'+' {
-                        tokens.push(Token::DeIncrement("++"));
-                    } else if curr == b'-' && next == b'-' {
-                        tokens.push(Token::DeIncrement("--"));
-                    } else if curr == b'<' && next == b'<' {
-                        tokens.push(Token::BitShift("<<"));
-                    } else if curr == b'>' && next == b'>' {
-                        tokens.push(Token::BitShift(">>"));
-                    } else if curr == b'|' && next == b'|' {
-                        tokens.push(Token::LogicalOr);
-                    } else if curr == b'&' && next == b'&' {
-                        tokens.push(Token::LogicalAnd);
-                    } else {
+                let token = match (curr, next) {
+                    (b'=', b'=') => Token::Equality("=="),
+                    (b'!', b'=') => Token::Equality("!="),
+                    (b'+', b'+') => Token::DeIncrement("++"),
+                    (b'-', b'-') => Token::DeIncrement("--"),
+                    (b'<', b'<') => Token::BitShift("<<"),
+                    (b'>', b'>') => Token::BitShift(">>"),
+                    (b'|', b'|') => Token::LogicalOr,
+                    (b'&', b'&') => Token::LogicalAnd,
+                    _ => {
                         end_index = start_index;
-                        tokens.push(tokenize_byte(curr, position));
+                        tokenize_byte(curr, position)
                     }
-                } else {
-                    end_index = start_index;
-                    tokens.push(tokenize_byte(bytes[start_index], position));
-                }
+                };
 
-                end_index += 1;
-            },
-            BlackspaceState::Identifier => {
-                tokens.push(Token::Identifier(as_str(&bytes[start_index..end_index])));
-            },
-            BlackspaceState::Number => {
-                tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
-            },
-            BlackspaceState::StringLiteral => {
-                tokens.push(Token::StringLiteral(as_str(&bytes[start_index..end_index])));
-            },
-            BlackspaceState::RegexLiteral => {
-                tokens.push(Token::RegexLiteral(as_str(&bytes[start_index..end_index])));
-            },
-            BlackspaceState::TemplateLiteral => {
-                tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
+                tokens.push(token);
+            } else {
+                end_index = start_index;
+                tokens.push(tokenize_byte(bytes[start_index], position));
             }
+
+            end_index += 1;
         }
 
         start_index = end_index;
@@ -311,8 +278,8 @@ fn tokenize_blackspace<'a, 'b>(input: &'a str, position: usize, is_possible_expr
     tokens
 }
 
-pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
-    let mut tokens: Vec<Token<'a>> = Vec::new();
+pub fn tokenize(input: &str) -> Vec<Token> {
+    let mut tokens: Vec<Token> = Vec::new();
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
@@ -330,29 +297,25 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
     while start_index < bytes.len() {
         let mut end_index = start_index;
 
-        if start_index + 1 < bytes.len() && bytes[start_index] == b'/'
-            && (bytes[start_index + 1] == b'/' || bytes[start_index + 1] == b'*') {
-            if bytes[start_index + 1] == b'/' {
-                state = TokenizerType::LineComment;
-                end_index = end_index + memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
-            } else if bytes[start_index + 1] == b'*' {
-                end_index += 1; // Increment since we can guarantee it's at least one more
-                state = TokenizerType::BlockComment;
-                loop {
-                    let next_position = memchr::memchr(b'/', &bytes[end_index..]);
-                    if let Some(pos) = next_position {
-                        let star_pos = end_index + pos - 1; // Right before the found slash
+        if start_index + 1 < bytes.len() && bytes[start_index] == b'/' && bytes[start_index + 1] == b'/' {
+            state = TokenizerType::LineComment;
 
-                        if bytes[star_pos] == b'*' {
-                            end_index = end_index + pos + 1;
-                            break;
-                        } else {
-                            end_index += pos + 1; // Didn't find it here, try again.
-                        }
-                    } else {
-                        end_index = bytes.len() - 1;
+            end_index += memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
+        } else if start_index + 1 < bytes.len() && bytes[start_index] == b'/' && bytes[start_index + 1] == b'*' {
+            end_index += 1;
+
+            state = TokenizerType::BlockComment;
+            loop {
+                if let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
+                    let star_pos = end_index + pos - 1; // Right before the found slash
+
+                    end_index += pos + 1; // Increment to the slash
+                    if bytes[star_pos] == b'*' {
                         break;
                     }
+                } else {
+                    end_index = bytes.len() - 1;
+                    break;
                 }
             }
         } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
@@ -364,13 +327,13 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
 
             end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
         } else if bytes[start_index] == b'/' && is_possible_expression {
-                if state == TokenizerType::Whitespace {
-                    tokens.push(Token::Whitespace(""));
-                }
+            if state == TokenizerType::Whitespace {
+                tokens.push(Token::Whitespace(""));
+            }
 
-                state = TokenizerType::RegexLiteral;
+            state = TokenizerType::RegexLiteral;
 
-                end_index = find_regex_literal(&bytes, end_index);
+            end_index = find_regex_literal(&bytes, end_index);
         } else if bytes[start_index] == b'`' {
             if state == TokenizerType::Whitespace {
                 tokens.push(Token::Whitespace(""));
@@ -444,7 +407,7 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
         start_index = end_index;
     }
 
-    if tokens.len() > 0 && !tokens.last().unwrap().is_whitespace() {
+    if !tokens.is_empty() && !tokens.last().unwrap().is_whitespace() {
         tokens.push(Token::Whitespace(""));
     }
 
@@ -623,6 +586,15 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::Identifier("a"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.remove(0), Token::Semicolon);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_block_comment() {
+        let mut tokens = tokenize("/* test * * * */");
+        println!("{:?}", tokens);
+        assert_eq!(tokens.remove(0), Token::BlockComment("/* test * * * */"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
