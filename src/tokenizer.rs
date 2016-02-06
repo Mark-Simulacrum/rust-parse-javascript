@@ -1,5 +1,4 @@
 use std::str;
-use std::fmt;
 use memchr;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -14,25 +13,29 @@ enum TokenizerType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum TokenType {
-    Whitespace,
-    Shebang,
-    Keyword,
-    Identifier,
-    NumericLiteral,
-    StringLiteral,
+pub enum Token<'a> {
+    Whitespace(&'a str),
+    Shebang(&'a str),
+    Keyword(&'a str),
+    Identifier(&'a str),
+    NumericLiteral(&'a str),
+    StringLiteral(&'a str),
+    DeIncrement(&'a str),
+    RegexLiteral(&'a str),
+    Equality(&'a str),
+    BitShift(&'a str),
+    Relational(char),
+    PlusMin(char),
+    LineComment(&'a str),
+    BlockComment(&'a str),
+    TemplateLiteral(&'a str),
     Equal,
-    DeIncrement,
     LogicalOr,
     LogicalAnd,
     BitwiseOr,
     BitwiseXOR,
     BitwiseAnd,
     BitwiseNot,
-    Equality,
-    Relational,
-    BitShift,
-    PlusMin,
     Modulo,
     Star,
     Slash,
@@ -47,47 +50,27 @@ enum TokenType {
     Comma,
     QuestionMark,
     Colon,
-    ExclamationMark,
-    RegexLiteral,
-    LineComment,
-    BlockComment,
-    TemplateLiteral
+    ExclamationMark
 }
 
-impl TokenType {
+impl<'a> Token<'a> {
     fn before_expression(&self) -> bool {
         match *self {
-            TokenType::LeftBracket | TokenType::LeftBrace | TokenType::LeftParen |
-            TokenType::Comma | TokenType::Semicolon | TokenType::Colon | TokenType::QuestionMark |
-            TokenType::Equal =>
+            Token::LeftBracket | Token::LeftBrace | Token::LeftParen |
+            Token::Comma | Token::Semicolon | Token::Colon | Token::QuestionMark |
+            Token::Equal | Token::ExclamationMark =>
                 true,
             _ => false
         }
     }
-}
 
-#[derive(PartialEq, Eq)]
-pub struct Token<'a> {
-    ty: TokenType,
-    value: &'a str
-}
-
-impl<'a> Token<'a> {
-    fn new(ty: TokenType, value: &'a str) -> Self {
-        Token { ty: ty, value: value }
-    }
-
-    fn before_expression(&self) -> bool {
-        self.ty.before_expression()
+    fn is_whitespace(&self) -> bool {
+        match *self {
+            Token::Whitespace(_) => true,
+            _ => false
+        }
     }
 }
-
-impl<'a> fmt::Debug for Token<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}Token: {:?}", self.ty, self.value)
-    }
-}
-
 
 fn is_id(c: u8) -> bool {
     (c as char).is_alphabetic() ||
@@ -96,42 +79,45 @@ fn is_id(c: u8) -> bool {
 }
 
 fn is_keyword(s: &str) -> bool {
-    s == "var" ||
-    s == "let" ||
-    s == "function" ||
-    s == "return" ||
-    s == "for" ||
-    s == "in" ||
-    s == "undefined" ||
-    s == "break" ||
-    s == "case" ||
-    s == "continue" ||
-    s == "debugger" ||
-    s == "default" ||
-    s == "do" ||
-    s == "if" ||
-    s == "finally" ||
-    s == "switch" ||
-    s == "throw" ||
-    s == "try" ||
-    s == "const" ||
-    s == "while" ||
-    s == "with" ||
-    s == "new" ||
-    s == "this" ||
-    s == "super" ||
-    s == "class" ||
-    s == "extends" ||
-    s == "export" ||
-    s == "import" ||
-    s == "yield" ||
-    s == "null" ||
-    s == "true" ||
-    s == "false" ||
-    s == "instanceof" ||
-    s == "typeof" ||
-    s == "void" ||
-    s == "delete"
+    match s {
+        "var" |
+        "let" |
+        "function" |
+        "return" |
+        "for" |
+        "undefined" |
+        "in" |
+        "break" |
+        "case" |
+        "continue" |
+        "debugger" |
+        "default" |
+        "do" |
+        "if" |
+        "finally" |
+        "switch" |
+        "throw" |
+        "try" |
+        "const" |
+        "while" |
+        "with" |
+        "new" |
+        "this" |
+        "super" |
+        "class" |
+        "extends" |
+        "export" |
+        "import" |
+        "yield" |
+        "null" |
+        "true" |
+        "false" |
+        "instanceof" |
+        "typeof" |
+        "void" |
+        "delete" => true,
+        _ => false
+    }
 }
 
 fn is_num(c: u8) -> bool {
@@ -149,11 +135,11 @@ enum BlackspaceState {
     Number
 }
 
-fn find_string_literal(bytes: &[u8], start_index: usize) -> usize {
+fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usize {
     let mut ignore_next = true;
     let mut end_index = start_index;
     while end_index < bytes.len() {
-        if (bytes[end_index] == b'"' || bytes[end_index] == b'\'') && !ignore_next {
+        if bytes[end_index] == quote_type && !ignore_next {
             end_index += 1;
             break;
         }
@@ -199,11 +185,40 @@ fn find_regex_literal(bytes: &[u8], start_index: usize) -> usize {
     end_index
 }
 
-fn previous_non_whitespace_token<'a>(tokens: &'a Vec<Token>) -> Option<&'a Token<'a>> {
-    tokens.iter().rev().find(|x| x.ty != TokenType::Whitespace)
+fn tokenize_byte<'a>(input: u8, position: usize) -> Token<'a> {
+    match input {
+        b'.' => Token::Dot,
+        b'(' => Token::LeftParen,
+        b')' => Token::RightParen,
+        b'{' => Token::LeftBrace,
+        b'}' => Token::RightBrace,
+        b'[' => Token::LeftBracket,
+        b']' => Token::RightBracket,
+        b';' => Token::Semicolon,
+        b'<' | b'>' => Token::Relational(input as char),
+        b'+' | b'-' => Token::PlusMin(input as char),
+        b'=' => Token::Equal,
+        b'*' => Token::Star,
+        b'%' => Token::Modulo,
+        b'/' => Token::Slash,
+        b',' => Token::Comma,
+        b':' => Token::Colon,
+        b'?' => Token::QuestionMark,
+        b'!' => Token::ExclamationMark,
+        b'~' => Token::BitwiseNot,
+        b'&' => Token::BitwiseAnd,
+        b'|' => Token::BitwiseOr,
+        b'^' => Token::BitwiseXOR,
+        _ => panic!("Unknown Blackspace Token \"{}\" at {}",
+            input as char, position)
+    }
 }
 
-fn tokenize_blackspace<'a>(input: &'a str, prev_token: Option<&Token>, position: usize) -> Vec<Token<'a>> {
+fn as_str(bytes: &[u8]) -> &str {
+    unsafe { str::from_utf8_unchecked(bytes) }
+}
+
+fn tokenize_blackspace<'a, 'b>(input: &'a str, position: usize, is_possible_expression: bool) -> Vec<Token<'a>> {
     let mut tokens = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
 
@@ -211,12 +226,13 @@ fn tokenize_blackspace<'a>(input: &'a str, prev_token: Option<&Token>, position:
     let mut state;
     while start_index < bytes.len() {
         if start_index != 0 {
-            tokens.push(Token::new(TokenType::Whitespace, ""));
+            tokens.push(Token::Whitespace(""));
         }
 
         let mut end_index = start_index + 1;
         if is_id(bytes[start_index]) {
             state = BlackspaceState::Identifier;
+
             while end_index < bytes.len() && is_id(bytes[end_index]) {
                 end_index += 1;
             }
@@ -228,69 +244,64 @@ fn tokenize_blackspace<'a>(input: &'a str, prev_token: Option<&Token>, position:
         } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
             state = BlackspaceState::StringLiteral;
 
-            end_index = find_string_literal(&bytes, end_index);
-        } else if bytes[start_index] == b'/' &&
-            prev_token.map_or(true, |tok| tok.before_expression()) {
+            end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
+        } else if bytes[start_index] == b'/' && is_possible_expression {
                 state = BlackspaceState::RegexLiteral;
                 end_index = find_regex_literal(&bytes, end_index);
         } else if bytes[start_index] == b'`' {
             state = BlackspaceState::TemplateLiteral;
             end_index = find_template_string_literal(&bytes, end_index);
-            // tokens.append(&mut tokenize_template_string_literal(&bytes[start_index..end_index]));
         } else {
             state = BlackspaceState::Unknown;
         }
 
-        let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..end_index]) };
         match state {
             BlackspaceState::Unknown => {
-                let ty = match content {
-                    "=" => TokenType::Equal,
-                    "==" | "!=" => TokenType::Equality,
-                    ";" => TokenType::Semicolon,
-                    "++" | "--" => TokenType::DeIncrement,
-                    "||" => TokenType::LogicalOr,
-                    "&&" => TokenType::LogicalAnd,
-                    "|" => TokenType::BitwiseOr,
-                    "&" => TokenType::BitwiseAnd,
-                    "^" => TokenType::BitwiseXOR,
-                    "<" | ">" => TokenType::Relational,
-                    "<<" | ">>" => TokenType::BitShift,
-                    "+" | "-" => TokenType::PlusMin,
-                    "%" => TokenType::Modulo,
-                    "*" => TokenType::Star,
-                    "/" => TokenType::Slash,
-                    "(" => TokenType::LeftParen,
-                    ")" => TokenType::RightParen,
-                    "{" => TokenType::LeftBrace,
-                    "}" => TokenType::RightBrace,
-                    "[" => TokenType::LeftBracket,
-                    "]" => TokenType::RightBracket,
-                    "." => TokenType::Dot,
-                    "," => TokenType::Comma,
-                    ":" => TokenType::Colon,
-                    "?" => TokenType::QuestionMark,
-                    "!" => TokenType::ExclamationMark,
-                    "~" => TokenType::BitwiseNot,
-                    _ => panic!("Unknown Blackspace Token \"{}\" at {},", content, position)
-                };
+                if end_index < bytes.len() {
+                    let curr = bytes[start_index];
+                    let next = bytes[end_index];
 
-                tokens.push(Token::new(ty, content));
+                    if curr == b'=' && next == b'=' {
+                        tokens.push(Token::Equality("=="));
+                    } else if curr == b'!' && next == b'=' {
+                        tokens.push(Token::Equality("!="));
+                    } else if curr == b'+' && next == b'+' {
+                        tokens.push(Token::DeIncrement("++"));
+                    } else if curr == b'-' && next == b'-' {
+                        tokens.push(Token::DeIncrement("--"));
+                    } else if curr == b'<' && next == b'<' {
+                        tokens.push(Token::BitShift("<<"));
+                    } else if curr == b'>' && next == b'>' {
+                        tokens.push(Token::BitShift(">>"));
+                    } else if curr == b'|' && next == b'|' {
+                        tokens.push(Token::LogicalOr);
+                    } else if curr == b'&' && next == b'&' {
+                        tokens.push(Token::LogicalAnd);
+                    } else {
+                        end_index = start_index;
+                        tokens.push(tokenize_byte(curr, position));
+                    }
+                } else {
+                    end_index = start_index;
+                    tokens.push(tokenize_byte(bytes[start_index], position));
+                }
+
+                end_index += 1;
             },
             BlackspaceState::Identifier => {
-                tokens.push(Token::new(TokenType::Identifier, content));
+                tokens.push(Token::Identifier(as_str(&bytes[start_index..end_index])));
             },
             BlackspaceState::Number => {
-                tokens.push(Token::new(TokenType::NumericLiteral, content));
+                tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
             },
             BlackspaceState::StringLiteral => {
-                tokens.push(Token::new(TokenType::StringLiteral, content));
+                tokens.push(Token::StringLiteral(as_str(&bytes[start_index..end_index])));
             },
             BlackspaceState::RegexLiteral => {
-                tokens.push(Token::new(TokenType::RegexLiteral, content));
+                tokens.push(Token::RegexLiteral(as_str(&bytes[start_index..end_index])));
             },
             BlackspaceState::TemplateLiteral => {
-                tokens.push(Token::new(TokenType::TemplateLiteral, content));
+                tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
             }
         }
 
@@ -301,19 +312,21 @@ fn tokenize_blackspace<'a>(input: &'a str, prev_token: Option<&Token>, position:
 }
 
 pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
+    let mut tokens: Vec<Token<'a>> = Vec::new();
     let bytes = input.as_bytes();
-    let mut tokens = Vec::new();
 
     let mut start_index = 0;
 
     if bytes.len() >= 2 && bytes[start_index] == b'#' && bytes[start_index + 1] == b'!' {
         let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
-        let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..nearest_newline]) };
-        tokens.push(Token::new(TokenType::Shebang, content));
+        let content = as_str(&bytes[start_index..nearest_newline]);
+        tokens.push(Token::Shebang(content));
         start_index += content.len();
     }
 
     let mut state = TokenizerType::Whitespace;
+    let mut last_broke_at_index = start_index;
+    let mut is_possible_expression = true;
     while start_index < bytes.len() {
         let mut end_index = start_index;
 
@@ -344,27 +357,37 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
             }
         } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
             if state == TokenizerType::Whitespace {
-                tokens.push(Token::new(TokenType::Whitespace, ""));
+                tokens.push(Token::Whitespace(""));
             }
 
             state = TokenizerType::StringLiteral;
 
-            end_index = find_string_literal(&bytes, end_index);
-        } else if bytes[start_index] == b'/' &&
-            previous_non_whitespace_token(&tokens).map_or(true, |tok| tok.before_expression()) {
+            end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
+        } else if bytes[start_index] == b'/' && is_possible_expression {
                 if state == TokenizerType::Whitespace {
-                    tokens.push(Token::new(TokenType::Whitespace, ""));
+                    tokens.push(Token::Whitespace(""));
                 }
 
                 state = TokenizerType::RegexLiteral;
 
                 end_index = find_regex_literal(&bytes, end_index);
         } else if bytes[start_index] == b'`' {
+            if state == TokenizerType::Whitespace {
+                tokens.push(Token::Whitespace(""));
+            }
+
             state = TokenizerType::TemplateLiteral;
             end_index = find_template_string_literal(&bytes, end_index);
         } else {
             while end_index < bytes.len() {
-                let is_whitespace = (bytes[end_index] as char).is_whitespace();
+                let b = bytes[end_index];
+                if last_broke_at_index != end_index && (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
+                    last_broke_at_index = end_index;
+
+                    break;
+                }
+
+                let is_whitespace = (b as char).is_whitespace();
 
                 if (state == TokenizerType::Whitespace) != is_whitespace {
                     break;
@@ -377,49 +400,52 @@ pub fn tokenize<'a>(input: &'a str) -> Vec<Token<'a>> {
         assert!(start_index < bytes.len(), "Start index is within range.");
         assert!(end_index <= bytes.len(), "End index is within range.");
 
-        let content = unsafe { str::from_utf8_unchecked(&bytes[start_index..end_index]) };
+        let content = as_str(&bytes[start_index..end_index]);
         match state {
             TokenizerType::Whitespace => {
-                tokens.push(Token::new(TokenType::Whitespace, content));
+                tokens.push(Token::Whitespace(content));
             },
             TokenizerType::Blackspace => {
                 if is_keyword(content) {
-                    tokens.push(Token::new(TokenType::Keyword, content));
+                    tokens.push(Token::Keyword(content));
                 } else {
                     let mut to_append = {
-                        tokenize_blackspace(content, previous_non_whitespace_token(&tokens), start_index)
+                        tokenize_blackspace(content, start_index, is_possible_expression)
                     };
                     tokens.append(&mut to_append);
                 }
             },
             TokenizerType::LineComment => {
-                tokens.push(Token::new(TokenType::LineComment, content));
+                tokens.push(Token::LineComment(content));
             },
             TokenizerType::BlockComment => {
-                tokens.push(Token::new(TokenType::BlockComment, content));
+                tokens.push(Token::BlockComment(content));
             },
             TokenizerType::StringLiteral => {
-                tokens.push(Token::new(TokenType::StringLiteral, content));
+                tokens.push(Token::StringLiteral(content));
             },
             TokenizerType::RegexLiteral => {
-                tokens.push(Token::new(TokenType::RegexLiteral, content));
+                tokens.push(Token::RegexLiteral(content));
             },
             TokenizerType::TemplateLiteral => {
-                tokens.push(Token::new(TokenType::TemplateLiteral, content));
+                tokens.push(Token::TemplateLiteral(content));
             }
         };
 
         state = if state == TokenizerType::Whitespace {
             TokenizerType::Blackspace
         } else {
+            if let Some(token) = tokens.last() {
+                is_possible_expression = token.before_expression();
+            }
             TokenizerType::Whitespace
         };
 
         start_index = end_index;
     }
 
-    if tokens.len() > 0 && tokens.last().unwrap().ty != TokenType::Whitespace {
-        tokens.push(Token::new(TokenType::Whitespace, ""));
+    if tokens.len() > 0 && !tokens.last().unwrap().is_whitespace() {
+        tokens.push(Token::Whitespace(""));
     }
 
     tokens
@@ -441,7 +467,7 @@ mod bench {
 
     macro_rules! benchmark_tokenize_blackspace {
         ($name: ident, $toRun: expr) => (
-            _benchmark!($name, super::tokenize_blackspace($toRun));
+            _benchmark!($name, super::tokenize_blackspace($toRun, 0, true));
         )
     }
 
@@ -455,6 +481,9 @@ mod bench {
         use test::Bencher;
         use super::super::{tokenize};
 
+        benchmark_tokenize!(shebang, "#! testing");
+        benchmark_tokenize!(template_literal, "`test${test}test`");
+        benchmark_tokenize!(regex, r#"/(=)\?(?=&|$) |\?\?/"#);
         benchmark_tokenize!(function, "function test() {}");
         benchmark_tokenize!(keyword, "function");
         benchmark_tokenize!(empty, "");
@@ -467,60 +496,61 @@ mod bench {
 
 
     benchmark_tokenize!(tokenize_ident, "$_very_Z_complex$$ident");
-    // benchmark_tokenize_blackspace!(tokenize_ident_blackspace, "$_very_Z_complex$$ident");
+    benchmark_tokenize_blackspace!(tokenize_ident_blackspace, "$_very_Z_complex$$ident");
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{tokenize, Token, TokenType};
+    use super::{tokenize, Token};
 
     #[test]
     fn tokenize_shebang() {
         let mut tokens = tokenize("#! testing");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Shebang, "#! testing"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Shebang("#! testing"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_template_literal_with_expression() {
         let mut tokens = tokenize("`test${test}test`");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::TemplateLiteral, "`test${test}test`"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::TemplateLiteral("`test${test}test`"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_line_comment() {
         let mut tokens = tokenize("// test");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// test"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::LineComment("// test"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_line_comment_complex() {
         let mut tokens = tokenize("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::LineComment("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_empty_string() {
         let mut tokens = tokenize("\"\"");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"\""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::StringLiteral("\"\""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_normal_string() {
         let mut tokens = tokenize("\"test foobar\"");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"test foobar\""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::StringLiteral("\"test foobar\""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -528,9 +558,9 @@ mod tests {
     fn tokenize_normal_regex() {
         let mut tokens = tokenize(r#"/(=)\?(?=&|$) |\?\?/"#);
         println!("{:?}", tokens);
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::RegexLiteral, r#"/(=)\?(?=&|$) |\?\?/"#));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::RegexLiteral(r#"/(=)\?(?=&|$) |\?\?/"#));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -538,40 +568,62 @@ mod tests {
     fn tokenize_modified_regex() {
         let mut tokens = tokenize("/te st/mgi");
         println!("{:?}", tokens);
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::RegexLiteral, "/te st/mgi"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::RegexLiteral("/te st/mgi"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_non_quote_escape_string() {
         let mut tokens = tokenize("\"\n\"");
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, "\"\n\""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::StringLiteral("\"\n\""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_quote_escape_string() {
         let mut tokens = tokenize(r#""\"""#);
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, r#""\"""#));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::StringLiteral(r#""\"""#));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
     #[test]
     fn tokenize_blackspace_embedded_string() {
         let mut tokens = tokenize(r#"("auto")"#);
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LeftParen, "("));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::StringLiteral, r#""auto""#));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::RightParen, ")"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::LeftParen);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::StringLiteral(r#""auto""#));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::RightParen);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_operators() {
+        let mut tokens = tokenize("a == b; !a;");
+        println!("tokens = {:?}", tokens);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Identifier("a"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::Equality("=="));
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::Identifier("b"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Semicolon);
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::ExclamationMark);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Identifier("a"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Semicolon);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -588,41 +640,41 @@ mod tests {
         }";
         let mut tokens = tokenize(input);
         println!("{:?}", tokens);
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Keyword, "function"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, " "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "test"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LeftParen, "("));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::RightParen, ")"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, " "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LeftBrace, "{"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n            "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::LineComment, "// test"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n            "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::BlockComment, "/*\n             * testing\n             * multiline BlockComment\n             */"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n            "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Keyword, "return"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, " "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "this"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Dot, "."));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "foobar"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Dot, "."));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Identifier, "TeSt"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Semicolon, ";"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n            "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::TemplateLiteral, "`test`"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Semicolon, ";"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, "\n        "));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::RightBrace, "}"));
-        assert_eq!(tokens.remove(0), Token::new(TokenType::Whitespace, ""));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Keyword("function"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::Identifier("test"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::LeftParen);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::RightParen);
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::LeftBrace);
+        assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
+        assert_eq!(tokens.remove(0), Token::LineComment("// test"));
+        assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
+        assert_eq!(tokens.remove(0), Token::BlockComment("/*\n             * testing\n             * multiline BlockComment\n             */"));
+        assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
+        assert_eq!(tokens.remove(0), Token::Keyword("return"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::Identifier("this"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Dot);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Identifier("foobar"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Dot);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Identifier("TeSt"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Semicolon);
+        assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
+        assert_eq!(tokens.remove(0), Token::TemplateLiteral("`test`"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Semicolon);
+        assert_eq!(tokens.remove(0), Token::Whitespace("\n        "));
+        assert_eq!(tokens.remove(0), Token::RightBrace);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 }
