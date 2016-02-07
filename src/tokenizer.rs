@@ -311,66 +311,81 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     while start_index < bytes.len() {
         let mut end_index = start_index;
 
-        if start_index + 1 < bytes.len() && bytes[start_index] == b'/' && bytes[start_index + 1] == b'/' {
-            state = TokenizerType::LineComment;
+        match (bytes[start_index], bytes.get(start_index + 1)) {
+            (b'/', Some(&b'/')) => {
+                state = TokenizerType::LineComment;
 
-            end_index += memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
-        } else if start_index + 1 < bytes.len() && bytes[start_index] == b'/' && bytes[start_index + 1] == b'*' {
-            end_index += 1;
+                end_index += memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
+            },
+            (b'/', Some(&b'*')) => {
+                state = TokenizerType::BlockComment;
 
-            state = TokenizerType::BlockComment;
-            loop {
-                if let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
-                    let star_pos = end_index + pos - 1; // Right before the found slash
+                end_index += 1; // Since we're looking for a slash, we need to skip the one we just found
 
-                    end_index += pos + 1; // Increment to the slash
-                    if bytes[star_pos] == b'*' {
+                let mut depth = 1;
+                while let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
+                    let slash_pos = end_index + pos;
+
+                    if bytes[slash_pos - 1] == b'*' { // Closing
+                        depth -= 1;
+                    } else if bytes[slash_pos + 1] == b'*' { // Opening
+                        depth += 1;
+                    }
+
+                    end_index = slash_pos + 1;
+
+                    if depth == 0 {
                         break;
                     }
-                } else {
-                    end_index = bytes.len() - 1;
-                    break;
-                }
-            }
-        } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
-            if state == TokenizerType::Whitespace {
-                tokens.push(Token::Whitespace(""));
-            }
-
-            state = TokenizerType::StringLiteral;
-
-            end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
-        } else if bytes[start_index] == b'/' && is_possible_expression {
-            if state == TokenizerType::Whitespace {
-                tokens.push(Token::Whitespace(""));
-            }
-
-            state = TokenizerType::RegexLiteral;
-
-            end_index = find_regex_literal(&bytes, end_index);
-        } else if bytes[start_index] == b'`' {
-            if state == TokenizerType::Whitespace {
-                tokens.push(Token::Whitespace(""));
-            }
-
-            state = TokenizerType::TemplateLiteral;
-            end_index = find_template_string_literal(&bytes, end_index);
-        } else {
-            while end_index < bytes.len() {
-                let b = bytes[end_index];
-                if last_broke_at_index != end_index && (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
-                    last_broke_at_index = end_index;
-
-                    break;
                 }
 
-                let is_whitespace = (b as char).is_whitespace();
-
-                if state.is_greyspace() != is_whitespace {
-                    break;
+                if depth != 0 {
+                    // Block Comment never ended
+                    end_index = bytes.len();
+                }
+            },
+            (b'/', _) if is_possible_expression => {
+                if state == TokenizerType::Whitespace {
+                    tokens.push(Token::Whitespace(""));
                 }
 
-                end_index += 1;
+                state = TokenizerType::RegexLiteral;
+
+                end_index = find_regex_literal(&bytes, end_index);
+            },
+            (b'"', _) | (b'\'', _) => {
+                if state == TokenizerType::Whitespace {
+                    tokens.push(Token::Whitespace(""));
+                }
+
+                state = TokenizerType::StringLiteral;
+
+                end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
+            },
+            (b'`', _) => {
+                if state == TokenizerType::Whitespace {
+                    tokens.push(Token::Whitespace(""));
+                }
+
+                state = TokenizerType::TemplateLiteral;
+                end_index = find_template_string_literal(&bytes, end_index);
+            },
+            _ => {
+                while end_index < bytes.len() {
+                    let b = bytes[end_index];
+                    if last_broke_at_index != end_index && (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
+                        last_broke_at_index = end_index;
+                        break;
+                    }
+
+                    let is_whitespace = (b as char).is_whitespace();
+
+                    if state.is_greyspace() != is_whitespace {
+                        break;
+                    }
+
+                    end_index += 1;
+                }
             }
         }
 
