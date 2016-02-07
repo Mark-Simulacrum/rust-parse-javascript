@@ -12,6 +12,17 @@ enum TokenizerType {
     BlockComment
 }
 
+impl TokenizerType {
+    fn is_greyspace(&self) -> bool {
+        match *self {
+            TokenizerType::Whitespace |
+            TokenizerType::BlockComment |
+            TokenizerType::LineComment => true,
+            _ => false
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token<'a> {
     Whitespace(&'a str),
@@ -64,9 +75,12 @@ impl<'a> Token<'a> {
         }
     }
 
-    fn is_whitespace(&self) -> bool {
+    fn is_greyspace(&self) -> bool {
         match *self {
-            Token::Whitespace(_) => true,
+            Token::Whitespace(_) |
+            Token::BlockComment(_) |
+            Token::LineComment(_) |
+            Token::Shebang(_) => true,
             _ => false
         }
     }
@@ -209,12 +223,12 @@ fn as_str(bytes: &[u8]) -> &str {
 }
 
 fn tokenize_blackspace(input: &str, position: usize, is_possible_expression: bool) -> Vec<Token> {
-    let mut tokens = Vec::with_capacity(input.len());
+    let mut tokens: Vec<Token> = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
     while start_index < bytes.len() {
-        if start_index != 0 {
+        if !tokens.is_empty() && !tokens.last().unwrap().is_greyspace() {
             tokens.push(Token::Whitespace(""));
         }
 
@@ -352,7 +366,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 let is_whitespace = (b as char).is_whitespace();
 
-                if (state == TokenizerType::Whitespace) != is_whitespace {
+                if state.is_greyspace() != is_whitespace {
                     break;
                 }
 
@@ -395,19 +409,17 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             }
         };
 
-        state = if state == TokenizerType::Whitespace {
+        state = if state.is_greyspace() {
             TokenizerType::Blackspace
         } else {
-            if let Some(token) = tokens.last() {
-                is_possible_expression = token.before_expression();
-            }
+            is_possible_expression = tokens.last().unwrap().before_expression();
             TokenizerType::Whitespace
         };
 
         start_index = end_index;
     }
 
-    if !tokens.is_empty() && !tokens.last().unwrap().is_whitespace() {
+    if !tokens.is_empty() && !tokens.last().unwrap().is_greyspace() {
         tokens.push(Token::Whitespace(""));
     }
 
@@ -470,7 +482,6 @@ mod tests {
     fn tokenize_shebang() {
         let mut tokens = tokenize("#! testing");
         assert_eq!(tokens.remove(0), Token::Shebang("#! testing"));
-        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -487,7 +498,6 @@ mod tests {
     fn tokenize_line_comment() {
         let mut tokens = tokenize("// test");
         assert_eq!(tokens.remove(0), Token::LineComment("// test"));
-        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -495,7 +505,6 @@ mod tests {
     fn tokenize_line_comment_complex() {
         let mut tokens = tokenize("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters");
         assert_eq!(tokens.remove(0), Token::LineComment("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
-        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -595,7 +604,6 @@ mod tests {
         let mut tokens = tokenize("/* test * * * */");
         println!("{:?}", tokens);
         assert_eq!(tokens.remove(0), Token::BlockComment("/* test * * * */"));
-        assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
 
