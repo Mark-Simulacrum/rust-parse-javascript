@@ -92,46 +92,44 @@ fn is_id(c: u8) -> bool {
     c == b'_'
 }
 
+#[allow(cyclomatic_complexity)]
 fn is_keyword(s: &str) -> bool {
-    match s {
-        "var" |
-        "let" |
-        "function" |
-        "return" |
-        "for" |
-        "undefined" |
-        "in" |
-        "break" |
-        "case" |
-        "continue" |
-        "debugger" |
-        "default" |
-        "do" |
-        "if" |
-        "finally" |
-        "switch" |
-        "throw" |
-        "try" |
-        "const" |
-        "while" |
-        "with" |
-        "new" |
-        "this" |
-        "super" |
-        "class" |
-        "extends" |
-        "export" |
-        "import" |
-        "yield" |
-        "null" |
-        "true" |
-        "false" |
-        "instanceof" |
-        "typeof" |
-        "void" |
-        "delete" => true,
-        _ => false
-    }
+    s == "var" ||
+    s == "let" ||
+    s == "function" ||
+    s == "return" ||
+    s == "for" ||
+    s == "undefined" ||
+    s == "in" ||
+    s == "break" ||
+    s == "case" ||
+    s == "continue" ||
+    s == "debugger" ||
+    s == "default" ||
+    s == "do" ||
+    s == "if" ||
+    s == "finally" ||
+    s == "switch" ||
+    s == "throw" ||
+    s == "try" ||
+    s == "const" ||
+    s == "while" ||
+    s == "with" ||
+    s == "new" ||
+    s == "this" ||
+    s == "super" ||
+    s == "class" ||
+    s == "extends" ||
+    s == "export" ||
+    s == "import" ||
+    s == "yield" ||
+    s == "null" ||
+    s == "true" ||
+    s == "false" ||
+    s == "instanceof" ||
+    s == "typeof" ||
+    s == "void" ||
+    s == "delete"
 }
 
 fn is_num(c: u8) -> bool {
@@ -289,13 +287,28 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
     }
 }
 
+fn is_next(bytes: &[u8], current_index: usize, next: u8) -> bool {
+    current_index + 1 < bytes.len() && bytes[current_index + 1] == next
+}
+
+fn is_prev(bytes: &[u8], current_index: usize, prev: u8) -> bool {
+    current_index - 1 > 0 && bytes[current_index - 1] == prev
+}
+
+// Parent function is responsible for checking that
+// slice length is greater than 0
+fn last_item<T>(slice: &[T]) -> &T {
+    unsafe { slice.get_unchecked(slice.len() - 1) }
+}
+
+#[allow(cyclomatic_complexity)]
 pub fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = Vec::new();
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
 
-    if bytes.len() >= 2 && bytes[start_index] == b'#' && bytes[start_index + 1] == b'!' {
+    if bytes[start_index] == b'#' && is_next(&bytes, start_index, b'!') {
         let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
         let content = as_str(&bytes[start_index..nearest_newline]);
         tokens.push(Token::Shebang(content));
@@ -308,13 +321,16 @@ pub fn tokenize(input: &str) -> Vec<Token> {
     while start_index < bytes.len() {
         let mut end_index = start_index;
 
-        match (bytes[start_index], bytes.get(start_index + 1)) {
-            (b'/', Some(&b'/')) => {
+        match bytes[start_index] {
+            b'/' if is_next(&bytes, start_index, b'/') => {
                 state = TokenizerType::LineComment;
 
-                end_index += memchr::memchr(b'\n', &bytes[end_index..]).unwrap_or(bytes.len() - end_index);
+                match memchr::memchr(b'\n', &bytes[end_index..]) {
+                    Some(pos) => end_index += pos,
+                    None => end_index = bytes.len()
+                };
             },
-            (b'/', Some(&b'*')) => {
+            b'/' if is_next(&bytes, start_index, b'*') => {
                 state = TokenizerType::BlockComment;
 
                 end_index += 1; // Since we're looking for a slash, we need to skip the one we just found
@@ -322,26 +338,23 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 let mut depth = 1;
                 while let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
                     let slash_pos = end_index + pos;
-
-                    if bytes[slash_pos - 1] == b'*' { // Closing
-                        depth -= 1;
-                    } else if bytes[slash_pos + 1] == b'*' { // Opening
-                        depth += 1;
-                    }
-
                     end_index = slash_pos + 1;
 
-                    if depth == 0 {
-                        break;
+                    if is_prev(&bytes, slash_pos, b'*') { // Closing
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else if is_next(&bytes, slash_pos, b'*') { // Opening
+                        depth += 1;
                     }
                 }
 
-                if depth != 0 {
-                    // Block Comment never ended
+                if depth != 0 { // Block Comment never ended
                     end_index = bytes.len();
                 }
             },
-            (b'/', _) if is_possible_expression => {
+            b'/' if is_possible_expression => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
                 }
@@ -350,7 +363,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 end_index = find_regex_literal(&bytes, end_index);
             },
-            (b'"', _) | (b'\'', _) => {
+            b'"' | b'\'' => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
                 }
@@ -359,7 +372,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
             },
-            (b'`', _) => {
+            b'`' => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
                 }
@@ -409,14 +422,14 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         state = if state.is_greyspace() {
             TokenizerType::Blackspace
         } else {
-            is_possible_expression = tokens.last().unwrap().before_expression();
+            is_possible_expression = last_item(&tokens).before_expression();
             TokenizerType::Whitespace
         };
 
         start_index = end_index;
     }
 
-    if !tokens.is_empty() && !tokens.last().unwrap().is_greyspace() {
+    if !tokens.is_empty() && !last_item(&tokens).is_greyspace() {
         tokens.push(Token::Whitespace(""));
     }
 
