@@ -390,33 +390,21 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         assert!(end_index <= bytes.len(), "End index is within range.");
 
         let content = as_str(&bytes[start_index..end_index]);
-        match state {
-            TokenizerType::Whitespace => {
-                tokens.push(Token::Whitespace(content));
-            },
-            TokenizerType::Blackspace => {
-                if is_keyword(content) {
-                    tokens.push(Token::Keyword(content));
-                } else {
-                    tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression)
-                }
-            },
-            TokenizerType::LineComment => {
-                tokens.push(Token::LineComment(content));
-            },
-            TokenizerType::BlockComment => {
-                tokens.push(Token::BlockComment(content));
-            },
-            TokenizerType::StringLiteral => {
-                tokens.push(Token::StringLiteral(content));
-            },
-            TokenizerType::RegexLiteral => {
-                tokens.push(Token::RegexLiteral(content));
-            },
-            TokenizerType::TemplateLiteral => {
-                tokens.push(Token::TemplateLiteral(content));
-            }
-        };
+        if state == TokenizerType::Blackspace && !is_keyword(content) {
+            tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression);
+        } else {
+            let token = match state {
+                TokenizerType::Blackspace => Token::Keyword(content),
+                TokenizerType::Whitespace => Token::Whitespace(content),
+                TokenizerType::LineComment => Token::LineComment(content),
+                TokenizerType::BlockComment => Token::BlockComment(content),
+                TokenizerType::StringLiteral => Token::StringLiteral(content),
+                TokenizerType::RegexLiteral => Token::RegexLiteral(content),
+                TokenizerType::TemplateLiteral => Token::TemplateLiteral(content)
+            };
+
+            tokens.push(token);
+        }
 
         state = if state.is_greyspace() {
             TokenizerType::Blackspace
