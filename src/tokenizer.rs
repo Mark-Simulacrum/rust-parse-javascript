@@ -222,8 +222,7 @@ fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
 
-fn tokenize_blackspace(input: &str, position: usize, is_possible_expression: bool) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::with_capacity(input.len());
+fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position: usize, is_possible_expression: bool) {
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
@@ -288,8 +287,6 @@ fn tokenize_blackspace(input: &str, position: usize, is_possible_expression: boo
 
         start_index = end_index;
     }
-
-    tokens
 }
 
 pub fn tokenize(input: &str) -> Vec<Token> {
@@ -401,10 +398,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 if is_keyword(content) {
                     tokens.push(Token::Keyword(content));
                 } else {
-                    let mut to_append = {
-                        tokenize_blackspace(content, start_index, is_possible_expression)
-                    };
-                    tokens.append(&mut to_append);
+                    tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression)
                 }
             },
             TokenizerType::LineComment => {
@@ -457,7 +451,7 @@ mod bench {
 
     macro_rules! benchmark_tokenize_blackspace {
         ($name: ident, $toRun: expr) => (
-            _benchmark!($name, super::tokenize_blackspace($toRun, 0, true));
+            _benchmark!($name, super::tokenize_blackspace(&mut Vec::new(), $toRun, 0, true));
         )
     }
 
