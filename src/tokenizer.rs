@@ -137,11 +137,11 @@ fn is_num(c: u8) -> bool {
     (c as char).is_numeric() || c == b'e' || c == b'E'
 }
 
-fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usize {
+fn next_occurence_of(bytes: &[u8], index: usize, byte: u8) -> usize {
     let mut ignore_next = true;
-    let mut end_index = start_index;
+    let mut end_index = index;
     while end_index < bytes.len() {
-        if bytes[end_index] == quote_type && !ignore_next {
+        if bytes[end_index] == byte && !ignore_next {
             end_index += 1;
             break;
         }
@@ -150,35 +150,18 @@ fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usiz
     }
 
     end_index
+}
+
+fn find_string_literal(bytes: &[u8], start_index: usize, quote_type: u8) -> usize {
+    next_occurence_of(bytes, start_index, quote_type)
 }
 
 fn find_template_string_literal(bytes: &[u8], start_index: usize) -> usize {
-    let mut ignore_next = true;
-    let mut end_index = start_index;
-    while end_index < bytes.len() {
-        if bytes[end_index] == b'`' && !ignore_next {
-            end_index += 1;
-            break;
-        }
-        ignore_next = !ignore_next && bytes[end_index] == b'\\';
-        end_index += 1;
-    }
-
-    end_index
+    next_occurence_of(bytes, start_index, b'`')
 }
 
 fn find_regex_literal(bytes: &[u8], start_index: usize) -> usize {
-    let mut end_index = start_index;
-
-    let mut ignore_next = true;
-    while end_index < bytes.len() {
-        if bytes[end_index] == b'/' && !ignore_next {
-            end_index += 1;
-            break;
-        }
-        ignore_next = !ignore_next && bytes[end_index] == b'\\';
-        end_index += 1;
-    }
+    let mut end_index = next_occurence_of(bytes, start_index, b'/');
 
     while end_index < bytes.len() && !(bytes[end_index] as char).is_whitespace() {
         end_index += 1;
