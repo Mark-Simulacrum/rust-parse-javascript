@@ -470,7 +470,8 @@ mod tests {
     fn tokenize_template_literal_with_expression() {
         let mut tokens = tokenize("`test${test}test`");
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
-        assert_eq!(tokens.remove(0), Token::TemplateLiteral("`test${test}test`"));
+        assert_eq!(tokens.remove(0),
+                   Token::TemplateLiteral("`test${test}test`"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
@@ -485,7 +486,8 @@ mod tests {
     #[test]
     fn tokenize_line_comment_complex() {
         let mut tokens = tokenize("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters");
-        assert_eq!(tokens.remove(0), Token::LineComment("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
+        assert_eq!(tokens.remove(0),
+                   Token::LineComment("// CSS escapes http://www.w3.org/TR/CSS21/syndata.html#escaped-characters"));
         assert_eq!(tokens.len(), 0);
     }
 
@@ -512,7 +514,8 @@ mod tests {
         let mut tokens = tokenize(r#"/(=)\?(?=&|$) |\?\?/"#);
         println!("{:?}", tokens);
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
-        assert_eq!(tokens.remove(0), Token::RegexLiteral(r#"/(=)\?(?=&|$) |\?\?/"#));
+        assert_eq!(tokens.remove(0),
+                   Token::RegexLiteral(r#"/(=)\?(?=&|$) |\?\?/"#));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
@@ -614,7 +617,8 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
         assert_eq!(tokens.remove(0), Token::LineComment("// test"));
         assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
-        assert_eq!(tokens.remove(0), Token::BlockComment("/*\n             * testing\n             * multiline BlockComment\n             */"));
+        assert_eq!(tokens.remove(0),
+                   Token::BlockComment("/*\n             * testing\n             * multiline BlockComment\n             */"));
         assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
         assert_eq!(tokens.remove(0), Token::Keyword("return"));
         assert_eq!(tokens.remove(0), Token::Whitespace(" "));
