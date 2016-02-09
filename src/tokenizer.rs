@@ -9,7 +9,7 @@ enum TokenizerType {
     TemplateLiteral,
     Blackspace,
     LineComment,
-    BlockComment
+    BlockComment,
 }
 
 impl TokenizerType {
@@ -18,7 +18,7 @@ impl TokenizerType {
             TokenizerType::Whitespace |
             TokenizerType::BlockComment |
             TokenizerType::LineComment => true,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -61,17 +61,22 @@ pub enum Token<'a> {
     Comma,
     QuestionMark,
     Colon,
-    ExclamationMark
+    ExclamationMark,
 }
 
 impl<'a> Token<'a> {
     fn before_expression(&self) -> bool {
         match *self {
-            Token::LeftBracket | Token::LeftBrace | Token::LeftParen |
-            Token::Comma | Token::Semicolon | Token::Colon | Token::QuestionMark |
-            Token::Equal | Token::ExclamationMark =>
-                true,
-            _ => false
+            Token::LeftBracket |
+            Token::LeftBrace |
+            Token::LeftParen |
+            Token::Comma |
+            Token::Semicolon |
+            Token::Colon |
+            Token::QuestionMark |
+            Token::Equal |
+            Token::ExclamationMark => true,
+            _ => false,
         }
     }
 
@@ -81,55 +86,28 @@ impl<'a> Token<'a> {
             Token::BlockComment(_) |
             Token::LineComment(_) |
             Token::Shebang(_) => true,
-            _ => false
+            _ => false,
         }
     }
 }
 
 fn is_id(c: u8) -> bool {
-    (c as char).is_alphabetic() ||
-    c == b'$' ||
-    c == b'_'
+    (c as char).is_alphabetic() || c == b'$' || c == b'_'
 }
 
 #[allow(cyclomatic_complexity)]
 fn is_keyword(s: &str) -> bool {
-    s == "var" ||
-    s == "let" ||
-    s == "function" ||
-    s == "return" ||
-    s == "for" ||
-    s == "undefined" ||
-    s == "in" ||
-    s == "break" ||
-    s == "case" ||
-    s == "continue" ||
-    s == "debugger" ||
-    s == "default" ||
-    s == "do" ||
-    s == "if" ||
-    s == "finally" ||
-    s == "switch" ||
-    s == "throw" ||
-    s == "try" ||
-    s == "const" ||
-    s == "while" ||
-    s == "with" ||
-    s == "new" ||
-    s == "this" ||
-    s == "super" ||
-    s == "class" ||
-    s == "extends" ||
-    s == "export" ||
-    s == "import" ||
-    s == "yield" ||
-    s == "null" ||
-    s == "true" ||
+    s == "var" || s == "let" || s == "function" || s == "return" || s == "for" ||
+    s == "undefined" || s == "in" || s == "break" || s == "case" ||
+    s == "continue" || s == "debugger" || s == "default" || s == "do" ||
+    s == "if" || s == "finally" ||
+    s == "switch" || s == "throw" || s == "try" ||
+    s == "const" || s == "while" || s == "with" || s == "new" || s == "this" || s == "super" ||
+    s == "class" || s == "extends" || s == "export" || s == "import" ||
+    s == "yield" || s == "null" || s == "true" ||
     s == "false" ||
-    s == "instanceof" ||
-    s == "typeof" ||
-    s == "void" ||
-    s == "delete"
+    s == "instanceof" || s == "typeof" ||
+    s == "void" || s == "delete"
 }
 
 fn is_num(c: u8) -> bool {
@@ -194,8 +172,11 @@ fn tokenize_byte<'a>(input: u8, position: usize) -> Token<'a> {
         b'&' => Token::BitwiseAnd,
         b'|' => Token::BitwiseOr,
         b'^' => Token::BitwiseXOR,
-        _ => panic!("Unknown Blackspace Token \"{}\" at {}",
-            input as char, position)
+        _ => {
+            panic!("Unknown Blackspace Token \"{}\" at {}",
+                   input as char,
+                   position)
+        }
     }
 }
 
@@ -203,7 +184,10 @@ fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
 
-fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position: usize, is_possible_expression: bool) {
+fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
+                           input: &'a str,
+                           position: usize,
+                           is_possible_expression: bool) {
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
@@ -310,9 +294,9 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 match memchr::memchr(b'\n', &bytes[end_index..]) {
                     Some(pos) => end_index += pos,
-                    None => end_index = bytes.len()
+                    None => end_index = bytes.len(),
                 };
-            },
+            }
             b'/' if is_next(&bytes, start_index, b'*') => {
                 state = TokenizerType::BlockComment;
 
@@ -323,20 +307,23 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     let slash_pos = end_index + pos;
                     end_index = slash_pos + 1;
 
-                    if is_prev(&bytes, slash_pos, b'*') { // Closing
+                    if is_prev(&bytes, slash_pos, b'*') {
+                        // Closing
                         depth -= 1;
                         if depth == 0 {
                             break;
                         }
-                    } else if is_next(&bytes, slash_pos, b'*') { // Opening
+                    } else if is_next(&bytes, slash_pos, b'*') {
+                        // Opening
                         depth += 1;
                     }
                 }
 
-                if depth != 0 { // Block Comment never ended
+                if depth != 0 {
+                    // Block Comment never ended
                     end_index = bytes.len();
                 }
-            },
+            }
             b'/' if is_possible_expression => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
@@ -345,7 +332,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 state = TokenizerType::RegexLiteral;
 
                 end_index = find_regex_literal(&bytes, end_index);
-            },
+            }
             b'"' | b'\'' => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
@@ -354,7 +341,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 state = TokenizerType::StringLiteral;
 
                 end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
-            },
+            }
             b'`' => {
                 if state == TokenizerType::Whitespace {
                     tokens.push(Token::Whitespace(""));
@@ -362,11 +349,12 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 state = TokenizerType::TemplateLiteral;
                 end_index = find_template_string_literal(&bytes, end_index);
-            },
+            }
             _ => {
                 while end_index < bytes.len() {
                     let b = bytes[end_index];
-                    if last_broke_at_index != end_index && (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
+                    if last_broke_at_index != end_index &&
+                       (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
                         last_broke_at_index = end_index;
                         break;
                     }
@@ -396,7 +384,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 TokenizerType::BlockComment => Token::BlockComment(content),
                 TokenizerType::StringLiteral => Token::StringLiteral(content),
                 TokenizerType::RegexLiteral => Token::RegexLiteral(content),
-                TokenizerType::TemplateLiteral => Token::TemplateLiteral(content)
+                TokenizerType::TemplateLiteral => Token::TemplateLiteral(content),
             };
 
             tokens.push(token);
@@ -447,7 +435,7 @@ mod bench {
 
     mod tokenize {
         use test::Bencher;
-        use super::super::{tokenize};
+        use super::super::tokenize;
 
         benchmark_tokenize!(shebang, "#! testing");
         benchmark_tokenize!(template_literal, "`test${test}test`");
