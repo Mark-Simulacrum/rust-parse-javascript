@@ -225,7 +225,7 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
 
     let mut start_index = 0;
     while start_index < bytes.len() {
-        if !tokens.is_empty() && !tokens.last().unwrap().is_greyspace() {
+        if !tokens.is_empty() && !last_item(&tokens).is_greyspace() {
             tokens.push(Token::Whitespace(""));
         }
 
