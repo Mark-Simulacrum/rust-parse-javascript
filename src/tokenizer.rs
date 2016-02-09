@@ -308,7 +308,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
     let mut start_index = 0;
 
-    if bytes[start_index] == b'#' && is_next(&bytes, start_index, b'!') {
+    if !bytes.is_empty() && bytes[start_index] == b'#' && is_next(&bytes, start_index, b'!') {
         let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
         let content = as_str(&bytes[start_index..nearest_newline]);
         tokens.push(Token::Shebang(content));
