@@ -303,25 +303,18 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
                 end_index += 1; // Since we're looking for a slash, we need to skip the one we just found
 
-                let mut depth = 1;
+                let mut did_break = false;
                 while let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
                     let slash_pos = end_index + pos;
                     end_index = slash_pos + 1;
 
                     if is_prev(&bytes, slash_pos, b'*') {
-                        // Closing
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    } else if is_next(&bytes, slash_pos, b'*') {
-                        // Opening
-                        depth += 1;
+                        did_break = true;
+                        break;
                     }
                 }
 
-                if depth != 0 {
-                    // Block Comment never ended
+                if !did_break { // Block Comment never ended
                     end_index = bytes.len();
                 }
             }
