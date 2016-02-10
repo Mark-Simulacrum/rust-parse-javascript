@@ -364,9 +364,6 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             }
         }
 
-        assert!(start_index < bytes.len(), "Start index is within range.");
-        assert!(end_index <= bytes.len(), "End index is within range.");
-
         let content = as_str(&bytes[start_index..end_index]);
         if state == TokenizerType::Blackspace && !is_keyword(content) {
             tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression);
