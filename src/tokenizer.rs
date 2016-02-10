@@ -1,4 +1,5 @@
 use std::str;
+use std::mem;
 use memchr;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -270,7 +271,7 @@ fn last_item<T>(slice: &[T]) -> &T {
 
 #[allow(cyclomatic_complexity)]
 pub fn tokenize(input: &str) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::new();
+    let mut tokens: Vec<Token> = Vec::with_capacity(4096 / mem::size_of::<Token>() + 1);
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
