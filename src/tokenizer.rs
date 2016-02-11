@@ -1,28 +1,27 @@
 use std::str;
-use std::mem;
 use memchr;
 
-#[derive(Debug, PartialEq, Eq)]
-enum TokenizerType {
-    Whitespace,
-    StringLiteral,
-    RegexLiteral,
-    TemplateLiteral,
-    Blackspace,
-    LineComment,
-    BlockComment,
-}
+// #[derive(Debug, PartialEq, Eq)]
+// enum TokenizerType {
+//     Whitespace,
+//     StringLiteral,
+//     RegexLiteral,
+//     TemplateLiteral,
+//     Blackspace,
+//     LineComment,
+//     BlockComment,
+// }
 
-impl TokenizerType {
-    fn is_greyspace(&self) -> bool {
-        match *self {
-            TokenizerType::Whitespace |
-            TokenizerType::BlockComment |
-            TokenizerType::LineComment => true,
-            _ => false,
-        }
-    }
-}
+// impl TokenizerType {
+//     fn is_greyspace(&self) -> bool {
+//         match *self {
+//             TokenizerType::Whitespace |
+//             TokenizerType::BlockComment |
+//             TokenizerType::LineComment => true,
+//             _ => false,
+//         }
+//     }
+// }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Token<'a> {
@@ -185,49 +184,77 @@ fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
 
-fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
-                           input: &'a str,
-                           position: usize,
-                           is_possible_expression: bool) {
-    let bytes = input.as_bytes();
+struct BlackspaceTokenizer<'a> {
+    bytes: &'a [u8],
+    position: usize,
+    index: usize,
+    is_possible_expression: bool,
+    is_previous_greyspace: bool,
+}
 
-    let mut start_index = 0;
-    while start_index < bytes.len() {
-        if !tokens.is_empty() && !last_item(&tokens).is_greyspace() {
-            tokens.push(Token::Whitespace(""));
+impl<'a> BlackspaceTokenizer<'a> {
+    fn tokenize(input: &'a str,
+        position: usize,
+        is_possible_expression: bool,
+        is_previous_greyspace: bool) -> Self {
+
+        BlackspaceTokenizer {
+            bytes: input.as_bytes(),
+            position: position,
+            is_possible_expression: is_possible_expression,
+            is_previous_greyspace: is_previous_greyspace,
+            index: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for BlackspaceTokenizer<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let bytes = self.bytes;
+        let start_index = self.index;
+
+        if start_index >= bytes.len() {
+            return None;
+        }
+
+        if !self.is_previous_greyspace {
+            self.is_previous_greyspace = true;
+            return Some(Token::Whitespace(""));
         }
 
         let mut end_index = start_index + 1;
-        if is_id(bytes[start_index]) {
+        let token = if is_id(bytes[start_index]) {
             while end_index < bytes.len() && is_id(bytes[end_index]) {
                 end_index += 1;
             }
 
-            tokens.push(Token::Identifier(as_str(&bytes[start_index..end_index])));
+            Token::Identifier(as_str(&bytes[start_index..end_index]))
         } else if is_num(bytes[start_index]) {
             while end_index < bytes.len() && is_num(bytes[end_index]) {
                 end_index += 1;
             }
 
-            tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
+            Token::NumericLiteral(as_str(&bytes[start_index..end_index]))
         } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
             end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
 
-            tokens.push(Token::StringLiteral(as_str(&bytes[start_index..end_index])));
-        } else if bytes[start_index] == b'/' && is_possible_expression {
+            Token::StringLiteral(as_str(&bytes[start_index..end_index]))
+        } else if bytes[start_index] == b'/' && self.is_possible_expression {
             end_index = find_regex_literal(&bytes, end_index);
 
-            tokens.push(Token::RegexLiteral(as_str(&bytes[start_index..end_index])));
+            Token::RegexLiteral(as_str(&bytes[start_index..end_index]))
         } else if bytes[start_index] == b'`' {
             end_index = find_template_string_literal(&bytes, end_index);
 
-            tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
+            Token::TemplateLiteral(as_str(&bytes[start_index..end_index]))
         } else {
-            if end_index < bytes.len() {
+            let tok = if end_index < bytes.len() {
                 let curr = bytes[start_index];
                 let next = bytes[end_index];
 
-                let token = match (curr, next) {
+                match (curr, next) {
                     (b'=', b'=') => Token::Equality("=="),
                     (b'!', b'=') => Token::Equality("!="),
                     (b'+', b'+') => Token::DeIncrement("++"),
@@ -238,71 +265,110 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
                     (b'&', b'&') => Token::LogicalAnd,
                     _ => {
                         end_index = start_index;
-                        tokenize_byte(curr, position)
+                        tokenize_byte(curr, start_index)
                     }
-                };
-
-                tokens.push(token);
+                }
             } else {
                 end_index = start_index;
-                tokens.push(tokenize_byte(bytes[start_index], position));
-            }
+                tokenize_byte(bytes[start_index], start_index)
+            };
 
             end_index += 1;
+
+            tok
+        };
+
+        self.is_previous_greyspace = false;
+        self.is_possible_expression = token.before_expression();
+        self.position += end_index;
+        self.index = end_index;
+
+        Some(token)
+    }
+}
+
+struct Tokenizer<'a> {
+    bytes: &'a [u8],
+    index: usize,
+    is_possible_expression: bool,
+    is_previous_greyspace: bool,
+    next: Option<Token<'a>>,
+    last_broke_at_index: usize,
+    blackspace_iter: Option<BlackspaceTokenizer<'a>>
+}
+
+impl<'a> Tokenizer<'a> {
+    fn tokenize(input: &'a str) -> Self {
+        let mut tok = Tokenizer {
+            bytes: input.as_bytes(),
+            index: 0,
+            last_broke_at_index: 0,
+            is_possible_expression: true,
+            is_previous_greyspace: false,
+            next: None,
+            blackspace_iter: None
+        };
+
+        if input.starts_with("#!") {
+            let end_index = memchr::memchr(b'\n', &tok.bytes).unwrap_or(tok.bytes.len());
+            let content = as_str(&tok.bytes[0..end_index]);
+            tok.index = end_index;
+
+            tok.is_previous_greyspace = true;
+            tok.next = Some(Token::Shebang(content));
         }
 
-        start_index = end_index;
+        tok
     }
 }
 
-fn is_next(bytes: &[u8], current_index: usize, next: u8) -> bool {
-    current_index + 1 < bytes.len() && bytes[current_index + 1] == next
-}
+impl<'a> Iterator for Tokenizer<'a> {
+    type Item = Token<'a>;
 
-fn is_prev(bytes: &[u8], current_index: usize, prev: u8) -> bool {
-    current_index - 1 > 0 && bytes[current_index - 1] == prev
-}
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next.is_some() {
+            let next_token = self.next.take().unwrap();
+            self.is_previous_greyspace = next_token.is_greyspace();
+            return Some(next_token);
+        }
 
-// Parent function is responsible for checking that
-// slice length is greater than 0
-fn last_item<T>(slice: &[T]) -> &T {
-    unsafe { slice.get_unchecked(slice.len() - 1) }
-}
+        if self.blackspace_iter.is_some() {
+            let t = self.blackspace_iter.as_mut().and_then(|x| x.next());
+            if let Some(t) = t {
+                self.is_previous_greyspace = t.is_greyspace();
+                return Some(t);
+            } else {
+                self.blackspace_iter = None;
+            }
+        }
 
-#[allow(cyclomatic_complexity)]
-pub fn tokenize(input: &str) -> Vec<Token> {
-    let mut tokens: Vec<Token> = Vec::with_capacity(4096 / mem::size_of::<Token>() + 1);
-    let bytes = input.as_bytes();
+        let bytes = self.bytes;
+        let start_index = self.index;
 
-    let mut start_index = 0;
+        if start_index >= bytes.len() {
+            if self.is_previous_greyspace {
+                return None;
+            } else {
+                self.is_previous_greyspace = true;
+                return Some(Token::Whitespace(""));
+            }
+        }
 
-    if input.starts_with("#!") {
-        let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
-        let content = as_str(&bytes[start_index..nearest_newline]);
-        tokens.push(Token::Shebang(content));
-        start_index += content.len();
-    }
-
-    let mut state = TokenizerType::Whitespace;
-    let mut last_broke_at_index = start_index;
-    let mut is_possible_expression = true;
-    while start_index < bytes.len() {
-        let mut end_index = start_index;
-
-        match bytes[start_index] {
+        let expecting_greyspace = !self.is_previous_greyspace;
+        let token = match bytes[start_index] {
             b'/' if is_next(&bytes, start_index, b'/') => {
-                state = TokenizerType::LineComment;
-
-                match memchr::memchr(b'\n', &bytes[end_index..]) {
-                    Some(pos) => end_index += pos,
-                    None => end_index = bytes.len(),
+                let end_index = match memchr::memchr(b'\n', &bytes[start_index..]) {
+                    Some(pos) => start_index + pos,
+                    None => bytes.len(),
                 };
+
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+                self.is_previous_greyspace = true;
+                Token::LineComment(content)
             }
             b'/' if is_next(&bytes, start_index, b'*') => {
-                state = TokenizerType::BlockComment;
-
-                end_index += 1; // Since we're looking for a slash, we need to skip the one we just found
-
+                let mut end_index = start_index + 1;
                 let mut did_break = false;
                 while let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
                     let slash_pos = end_index + pos;
@@ -317,116 +383,268 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 if !did_break { // Block Comment never ended
                     end_index = bytes.len();
                 }
+
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+                self.is_previous_greyspace = true;
+                Token::BlockComment(content)
             }
-            b'/' if is_possible_expression => {
-                if state == TokenizerType::Whitespace {
-                    tokens.push(Token::Whitespace(""));
+            b'/' if self.is_possible_expression => {
+                let end_index = find_regex_literal(&bytes, start_index);
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+                self.is_previous_greyspace = false;
+                let tok = Token::RegexLiteral(content);
+
+                if expecting_greyspace {
+                    self.next = Some(tok);
+                    self.is_previous_greyspace = true;
+                    Token::Whitespace("")
+                } else {
+                    tok
                 }
-
-                state = TokenizerType::RegexLiteral;
-
-                end_index = find_regex_literal(&bytes, end_index);
             }
             b'"' | b'\'' => {
-                if state == TokenizerType::Whitespace {
-                    tokens.push(Token::Whitespace(""));
+                let end_index = find_string_literal(&bytes, start_index, bytes[start_index]);
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+                self.is_previous_greyspace = false;
+                let tok = Token::StringLiteral(content);
+
+                if expecting_greyspace {
+                    self.next = Some(tok);
+                    self.is_previous_greyspace = true;
+                    Token::Whitespace("")
+                } else {
+                    tok
                 }
-
-                state = TokenizerType::StringLiteral;
-
-                end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
             }
             b'`' => {
-                if state == TokenizerType::Whitespace {
-                    tokens.push(Token::Whitespace(""));
-                }
+                let end_index = find_template_string_literal(&bytes, start_index);
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+                self.is_previous_greyspace = false;
+                let tok = Token::TemplateLiteral(content);
 
-                state = TokenizerType::TemplateLiteral;
-                end_index = find_template_string_literal(&bytes, end_index);
+                if expecting_greyspace {
+                    self.next = Some(tok);
+                    self.is_previous_greyspace = true;
+                    Token::Whitespace("")
+                } else {
+                    tok
+                }
             }
             _ => {
+                let mut end_index = start_index;
+
+                // accumulate chars until we change from blackspace to whitespace
+                let break_at_whitespace = !(bytes[end_index] as char).is_whitespace();
                 while end_index < bytes.len() {
                     let b = bytes[end_index];
-                    if last_broke_at_index != end_index &&
+                    if self.last_broke_at_index != end_index &&
                        (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
-                        last_broke_at_index = end_index;
+                        self.last_broke_at_index = end_index;
                         break;
                     }
 
-                    let is_whitespace = (b as char).is_whitespace();
-
-                    if state.is_greyspace() != is_whitespace {
+                    if break_at_whitespace == (b as char).is_whitespace() {
                         break;
                     }
-
                     end_index += 1;
                 }
+
+
+                let content = as_str(&bytes[start_index..end_index]);
+                self.index = end_index;
+
+                if break_at_whitespace {
+                    if is_keyword(content) {
+                        self.is_previous_greyspace = false;
+                        Token::Keyword(content)
+                    } else {
+                        let mut iter = BlackspaceTokenizer::tokenize(
+                            content, self.index, self.is_possible_expression, self.is_previous_greyspace);
+                        let next = iter.next();
+                        self.blackspace_iter = Some(iter);
+                        next.unwrap()
+                    }
+                } else {
+                    self.is_previous_greyspace = true;
+                    Token::Whitespace(content)
+                }
             }
-        }
-
-        let content = as_str(&bytes[start_index..end_index]);
-        if state == TokenizerType::Blackspace && !is_keyword(content) {
-            tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression);
-        } else {
-            let token = match state {
-                TokenizerType::Blackspace => Token::Keyword(content),
-                TokenizerType::Whitespace => Token::Whitespace(content),
-                TokenizerType::LineComment => Token::LineComment(content),
-                TokenizerType::BlockComment => Token::BlockComment(content),
-                TokenizerType::StringLiteral => Token::StringLiteral(content),
-                TokenizerType::RegexLiteral => Token::RegexLiteral(content),
-                TokenizerType::TemplateLiteral => Token::TemplateLiteral(content),
-            };
-
-            tokens.push(token);
-        }
-
-        state = if state.is_greyspace() {
-            TokenizerType::Blackspace
-        } else {
-            is_possible_expression = last_item(&tokens).before_expression();
-            TokenizerType::Whitespace
         };
 
-        start_index = end_index;
+        if !self.is_previous_greyspace && expecting_greyspace {
+            self.next = Some(token);
+            self.is_previous_greyspace = true;
+            Some(Token::Whitespace(""))
+        } else {
+            Some(token)
+        }
     }
-
-    if !tokens.is_empty() && !last_item(&tokens).is_greyspace() {
-        tokens.push(Token::Whitespace(""));
-    }
-
-    tokens
 }
+
+pub fn tokenize(input: &str) -> Vec<Token> {
+    let tokenizer = Tokenizer::tokenize(input);
+    tokenizer.collect()
+    // // let mut v = Vec::new();
+    // for t in tokenizer {
+    //     t.is_greyspace();
+    //     // v.push(t);
+    // }
+    // Vec::new()
+}
+
+fn is_next(bytes: &[u8], current_index: usize, next: u8) -> bool {
+    current_index + 1 < bytes.len() && bytes[current_index + 1] == next
+}
+
+fn is_prev(bytes: &[u8], current_index: usize, prev: u8) -> bool {
+    current_index - 1 > 0 && bytes[current_index - 1] == prev
+}
+
+// Parent function is responsible for checking that
+// slice length is greater than 0
+// fn last_item<T>(slice: &[T]) -> &T {
+//     unsafe { slice.get_unchecked(slice.len() - 1) }
+// }
+
+#[allow(cyclomatic_complexity)]
+// pub fn tokenize(input: &str) -> Vec<Token> {
+//     let mut state = TokenizerType::Whitespace;
+//     let mut last_broke_at_index = start_index;
+//     let mut is_possible_expression = true;
+//     while start_index < bytes.len() {
+//         let mut end_index = start_index;
+
+//         match bytes[start_index] {
+//             b'/' if is_next(&bytes, start_index, b'/') => {
+//                 state = TokenizerType::LineComment;
+
+//                 match memchr::memchr(b'\n', &bytes[end_index..]) {
+//                     Some(pos) => end_index += pos,
+//                     None => end_index = bytes.len(),
+//                 };
+//             }
+//             b'/' if is_next(&bytes, start_index, b'*') => {
+//                 state = TokenizerType::BlockComment;
+
+//                 end_index += 1; // Since we're looking for a slash, we need to skip the one we just found
+
+//                 let mut did_break = false;
+//                 while let Some(pos) = memchr::memchr(b'/', &bytes[end_index..]) {
+//                     let slash_pos = end_index + pos;
+//                     end_index = slash_pos + 1;
+
+//                     if is_prev(&bytes, slash_pos, b'*') {
+//                         did_break = true;
+//                         break;
+//                     }
+//                 }
+
+//                 if !did_break { // Block Comment never ended
+//                     end_index = bytes.len();
+//                 }
+//             }
+//             b'/' if is_possible_expression => {
+//                 if state == TokenizerType::Whitespace {
+//                     tokens.push(Token::Whitespace(""));
+//                 }
+
+//                 state = TokenizerType::RegexLiteral;
+
+//                 end_index = find_regex_literal(&bytes, end_index);
+//             }
+//             b'"' | b'\'' => {
+//                 if state == TokenizerType::Whitespace {
+//                     tokens.push(Token::Whitespace(""));
+//                 }
+
+//                 state = TokenizerType::StringLiteral;
+
+//                 end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
+//             }
+//             b'`' => {
+//                 if state == TokenizerType::Whitespace {
+//                     tokens.push(Token::Whitespace(""));
+//                 }
+
+//                 state = TokenizerType::TemplateLiteral;
+//                 end_index = find_template_string_literal(&bytes, end_index);
+//             }
+//             _ => {
+//                 while end_index < bytes.len() {
+//                     let b = bytes[end_index];
+//                     if last_broke_at_index != end_index &&
+//                        (b == b'/' || b == b'"' || b == b'\'' || b == b'`') {
+//                         last_broke_at_index = end_index;
+//                         break;
+//                     }
+
+//                     let is_whitespace = (b as char).is_whitespace();
+
+//                     if state.is_greyspace() != is_whitespace {
+//                         break;
+//                     }
+
+//                     end_index += 1;
+//                 }
+//             }
+//         }
+
+//         let content = as_str(&bytes[start_index..end_index]);
+//         if state == TokenizerType::Blackspace && !is_keyword(content) {
+//             let iter = BlackspaceTokenizer::tokenize(&tokens, content, start_index);
+//             for token in iter {
+//                 tokens.push(token);
+//             }
+//         } else {
+//             let token = match state {
+//                 TokenizerType::Blackspace => Token::Keyword(content),
+//                 TokenizerType::Whitespace => Token::Whitespace(content),
+//                 TokenizerType::LineComment => Token::LineComment(content),
+//                 TokenizerType::BlockComment => Token::BlockComment(content),
+//                 TokenizerType::StringLiteral => Token::StringLiteral(content),
+//                 TokenizerType::RegexLiteral => Token::RegexLiteral(content),
+//                 TokenizerType::TemplateLiteral => Token::TemplateLiteral(content),
+//             };
+
+//             tokens.push(token);
+//         }
+
+//         state = if state.is_greyspace() {
+//             TokenizerType::Blackspace
+//         } else {
+//             is_possible_expression = last_item(&tokens).before_expression();
+//             TokenizerType::Whitespace
+//         };
+
+//         start_index = end_index;
+//     }
+
+//     if !tokens.is_empty() && !last_item(&tokens).is_greyspace() {
+//         tokens.push(Token::Whitespace(""));
+//     }
+
+//     tokens
+// }
 
 #[cfg(test)]
 mod bench {
-    use super::*;
-    use test::Bencher;
-
-    macro_rules! _benchmark {
-        ($name: ident, $toRun: expr) => (
-            #[bench]
-            fn $name(b: &mut Bencher) {
-                b.iter(|| $toRun);
-            }
-        );
-    }
-
-    macro_rules! benchmark_tokenize_blackspace {
-        ($name: ident, $toRun: expr) => (
-            _benchmark!($name, super::tokenize_blackspace(&mut Vec::new(), $toRun, 0, true));
-        )
-    }
-
-    macro_rules! benchmark_tokenize {
-        ($name: ident, $toRun: expr) => (
-            _benchmark!($name, tokenize($toRun));
-        )
-    }
 
     mod tokenize {
         use test::Bencher;
         use super::super::tokenize;
+
+        macro_rules! benchmark_tokenize {
+            ($name: ident, $toRun: expr) => (
+                #[bench]
+                fn $name(b: &mut Bencher) {
+                    b.iter(|| tokenize($toRun));
+                }
+            )
+        }
 
         benchmark_tokenize!(shebang, "#! testing");
         benchmark_tokenize!(template_literal, "`test${test}test`");
@@ -439,11 +657,8 @@ mod bench {
         benchmark_tokenize!(comment_block, "/* testi*/");
         benchmark_tokenize!(comment_long_block, "/* testitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitestitesti*/");
         benchmark_tokenize!(sample, include_str!("../input.js"));
+        benchmark_tokenize!(tokenize_ident, "$_very_Z_complex$$ident");
     }
-
-
-    benchmark_tokenize!(tokenize_ident, "$_very_Z_complex$$ident");
-    benchmark_tokenize_blackspace!(tokenize_ident_blackspace, "$_very_Z_complex$$ident");
 }
 
 #[cfg(test)]
