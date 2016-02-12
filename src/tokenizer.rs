@@ -41,6 +41,9 @@ pub enum Token<'a> {
     LineComment(&'a str),
     BlockComment(&'a str),
     TemplateLiteral(&'a str),
+    UpdateAssignment(&'a str),
+    Exponeniation,
+    Arrow,
     Equal,
     LogicalOr,
     LogicalAnd,
@@ -149,38 +152,6 @@ fn find_regex_literal(bytes: &[u8], start_index: usize) -> usize {
     end_index
 }
 
-fn tokenize_byte<'a>(input: u8, position: usize) -> Token<'a> {
-    match input {
-        b'.' => Token::Dot,
-        b'(' => Token::LeftParen,
-        b')' => Token::RightParen,
-        b'{' => Token::LeftBrace,
-        b'}' => Token::RightBrace,
-        b'[' => Token::LeftBracket,
-        b']' => Token::RightBracket,
-        b';' => Token::Semicolon,
-        b'<' | b'>' => Token::Relational(input as char),
-        b'+' | b'-' => Token::PlusMin(input as char),
-        b'=' => Token::Equal,
-        b'*' => Token::Star,
-        b'%' => Token::Modulo,
-        b'/' => Token::Slash,
-        b',' => Token::Comma,
-        b':' => Token::Colon,
-        b'?' => Token::QuestionMark,
-        b'!' => Token::ExclamationMark,
-        b'~' => Token::BitwiseNot,
-        b'&' => Token::BitwiseAnd,
-        b'|' => Token::BitwiseOr,
-        b'^' => Token::BitwiseXOR,
-        _ => {
-            panic!("Unknown Blackspace Token \"{}\" at {}",
-                   input as char,
-                   position)
-        }
-    }
-}
-
 fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
@@ -223,32 +194,86 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
 
             tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
         } else {
-            if end_index < bytes.len() {
-                let curr = bytes[start_index];
-                let next = bytes[end_index];
-
-                let token = match (curr, next) {
-                    (b'=', b'=') => Token::Equality("=="),
-                    (b'!', b'=') => Token::Equality("!="),
-                    (b'+', b'+') => Token::DeIncrement("++"),
-                    (b'-', b'-') => Token::DeIncrement("--"),
-                    (b'<', b'<') => Token::BitShift("<<"),
-                    (b'>', b'>') => Token::BitShift(">>"),
-                    (b'|', b'|') => Token::LogicalOr,
-                    (b'&', b'&') => Token::LogicalAnd,
-                    _ => {
-                        end_index = start_index;
-                        tokenize_byte(curr, position)
-                    }
-                };
-
-                tokens.push(token);
+            let curr = bytes[start_index];
+            let next = if end_index < bytes.len() {
+                Some(bytes[end_index])
             } else {
-                end_index = start_index;
-                tokens.push(tokenize_byte(bytes[start_index], position));
-            }
+                None
+            };
+            let next_next = if end_index + 1 < bytes.len() {
+                Some(bytes[end_index + 1])
+            } else {
+                None
+            };
 
-            end_index += 1;
+            let token = match (curr, next, next_next) {
+                (b'>', Some(b'>'), Some(b'>')) if end_index + 2 < bytes.len() &&
+                                                  bytes[end_index + 2] == b'=' => {
+                    Token::UpdateAssignment(">>>=")
+                }
+                (b'*', Some(b'*'), Some(b'=')) => Token::UpdateAssignment("**="),
+                (b'<', Some(b'<'), Some(b'=')) => Token::UpdateAssignment("<<="),
+                (b'>', Some(b'>'), Some(b'=')) => Token::UpdateAssignment(">>="),
+                (b'=', Some(b'='), Some(b'=')) => Token::Equality("==="),
+                (b'!', Some(b'='), Some(b'=')) => Token::Equality("!=="),
+                (b'=', Some(b'='), _) => Token::Equality("=="),
+                (b'<', Some(b'='), _) => Token::Equality("<="),
+                (b'>', Some(b'='), _) => Token::Equality(">="),
+                (b'!', Some(b'='), _) => Token::Equality("!="),
+                (b'+', Some(b'='), _) => Token::UpdateAssignment("+="),
+                (b'-', Some(b'='), _) => Token::UpdateAssignment("-="),
+                (b'+', Some(b'+'), _) => Token::DeIncrement("++"),
+                (b'-', Some(b'-'), _) => Token::DeIncrement("--"),
+                (b'<', Some(b'<'), _) => Token::BitShift("<<"),
+                (b'>', Some(b'>'), _) => Token::BitShift(">>"),
+                (b'*', Some(b'*'), _) => Token::Exponeniation,
+                (b'|', Some(b'|'), _) => Token::LogicalOr,
+                (b'&', Some(b'&'), _) => Token::LogicalAnd,
+                (b'=', Some(b'>'), _) => Token::Arrow,
+                (b'%', Some(b'='), _) => Token::UpdateAssignment("%="),
+                (b'/', Some(b'='), _) => Token::UpdateAssignment("/="),
+                (b'*', Some(b'='), _) => Token::UpdateAssignment("*="),
+                (b'|', Some(b'='), _) => Token::UpdateAssignment("|="),
+                (b'.', _, _) => Token::Dot,
+                (b'(', _, _) => Token::LeftParen,
+                (b')', _, _) => Token::RightParen,
+                (b'{', _, _) => Token::LeftBrace,
+                (b'}', _, _) => Token::RightBrace,
+                (b'[', _, _) => Token::LeftBracket,
+                (b']', _, _) => Token::RightBracket,
+                (b';', _, _) => Token::Semicolon,
+                (b'<', _, _) | (b'>', _, _) => Token::Relational(curr as char),
+                (b'+', _, _) | (b'-', _, _) => Token::PlusMin(curr as char),
+                (b'=', _, _) => Token::Equal,
+                (b'*', _, _) => Token::Star,
+                (b'%', _, _) => Token::Modulo,
+                (b'/', _, _) => Token::Slash,
+                (b',', _, _) => Token::Comma,
+                (b':', _, _) => Token::Colon,
+                (b'?', _, _) => Token::QuestionMark,
+                (b'!', _, _) => Token::ExclamationMark,
+                (b'~', _, _) => Token::BitwiseNot,
+                (b'&', _, _) => Token::BitwiseAnd,
+                (b'|', _, _) => Token::BitwiseOr,
+                (b'^', _, _) => Token::BitwiseXOR,
+                _ => {
+                    panic!("Unknown Blackspace Token {}{:?}{:?} at {}",
+                           curr as char,
+                           next,
+                           next_next,
+                           position)
+                }
+            };
+
+            end_index += match token {
+                Token::UpdateAssignment("**=") |
+                Token::UpdateAssignment("<<=") |
+                Token::UpdateAssignment(">>=") |
+                Token::Equality("===") |
+                Token::Equality("!==") => 2,
+                _ => 1,
+            };
+            tokens.push(token);
         }
 
         start_index = end_index;
