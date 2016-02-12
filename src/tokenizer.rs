@@ -276,7 +276,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
     let mut start_index = 0;
 
-    if input.starts_with("#!") {
+    if bytes.len() >= 2 && bytes[0] == b'#' && bytes[1] == b'!' {
         let nearest_newline = memchr::memchr(b'\n', &bytes).unwrap_or(bytes.len());
         let content = as_str(&bytes[start_index..nearest_newline]);
         tokens.push(Token::Shebang(content));
