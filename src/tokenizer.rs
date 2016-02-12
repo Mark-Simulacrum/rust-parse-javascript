@@ -339,7 +339,8 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     }
                 }
 
-                if !did_break { // Block Comment never ended
+                // Block Comment never ended
+                if !did_break {
                     end_index = bytes.len();
                 }
             }
