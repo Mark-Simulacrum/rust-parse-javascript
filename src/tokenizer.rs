@@ -271,7 +271,15 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
                 Token::UpdateAssignment(">>=") |
                 Token::Equality("===") |
                 Token::Equality("!==") => 2,
-                _ => 1,
+                Token::Equality(_) |
+                Token::UpdateAssignment(_) |
+                Token::DeIncrement(_) |
+                Token::BitShift(_) |
+                Token::Exponeniation |
+                Token::LogicalOr |
+                Token::LogicalAnd |
+                Token::Arrow => 1,
+                _ => 0,
             };
             tokens.push(token);
         }
