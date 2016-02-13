@@ -4,8 +4,10 @@ name = "parsejs"
 version = "0.1.0"
 
 [dependencies]
-clippy = "0.0.37"
+clippy = "0.0.38"
 memchr = "0.1.7"
+
+[profile]
 
 [profile.release]
 debug = true
