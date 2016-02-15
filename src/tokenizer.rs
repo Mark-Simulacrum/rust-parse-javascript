@@ -114,11 +114,6 @@ fn is_keyword(s: &str) -> bool {
     s == "void" || s == "delete"
 }
 
-fn is_num(c: u8) -> bool {
-    // 100 and 10e10 are both valid numbers
-    (c as char).is_numeric() || c == b'e' || c == b'E'
-}
-
 fn next_occurence_of(bytes: &[u8], index: usize, byte: u8) -> usize {
     let mut ignore_next = true;
     let mut end_index = index;
@@ -175,9 +170,19 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
             }
 
             tokens.push(Token::Identifier(as_str(&bytes[start_index..end_index])));
-        } else if is_num(bytes[start_index]) {
-            while end_index < bytes.len() && is_num(bytes[end_index]) {
+        } else if (bytes[start_index] as char).is_numeric() {
+            // consume digits, then, if we find an e, consume digits after it as well.
+
+            while end_index < bytes.len() && (bytes[end_index] as char).is_numeric() {
                 end_index += 1;
+            }
+
+            if end_index < bytes.len() && (bytes[end_index] == b'e' || bytes[end_index] == b'E') {
+                end_index += 1;
+
+                while end_index < bytes.len() && (bytes[end_index] as char).is_numeric() {
+                    end_index += 1;
+                }
             }
 
             tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
