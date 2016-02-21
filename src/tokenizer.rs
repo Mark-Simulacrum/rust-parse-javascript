@@ -623,6 +623,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(cyclomatic_complexity)]
     fn tokenize_sample() {
         let input = "function test() {
             // test
