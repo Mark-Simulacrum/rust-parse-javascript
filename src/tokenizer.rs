@@ -455,7 +455,8 @@ mod bench {
 
         benchmark_tokenize!(shebang, "#! testing");
         benchmark_tokenize!(template_literal, "`test${test}test`");
-        benchmark_tokenize!(regex, r#"/(=)\?(?=&|$) |\?\?/"#);
+        benchmark_tokenize!(regex_simple, "/foo/g");
+        benchmark_tokenize!(regex_complex, r#"/(=)\?(?=&|$) |\?\?/"#);
         benchmark_tokenize!(function, "function test() {}");
         benchmark_tokenize!(keyword, "function");
         benchmark_tokenize!(empty, "");
@@ -532,6 +533,20 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.remove(0),
                    Token::RegexLiteral(r#"/(=)\?(?=&|$) |\?\?/"#));
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.len(), 0);
+    }
+
+    #[test]
+    fn tokenize_regex_after_whitespace() {
+        let mut tokens = tokenize("a = /foo/");
+        println!("{:?}", tokens);
+        assert_eq!(tokens.remove(0), Token::Whitespace(""));
+        assert_eq!(tokens.remove(0), Token::Identifier("a"));
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::Equal);
+        assert_eq!(tokens.remove(0), Token::Whitespace(" "));
+        assert_eq!(tokens.remove(0), Token::RegexLiteral("/foo/"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.len(), 0);
     }
