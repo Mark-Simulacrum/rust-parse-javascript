@@ -151,10 +151,7 @@ fn as_str(bytes: &[u8]) -> &str {
     unsafe { str::from_utf8_unchecked(bytes) }
 }
 
-fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
-                           input: &'a str,
-                           position: usize,
-                           is_possible_expression: bool) {
+fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position: usize) {
     let bytes = input.as_bytes();
 
     let mut start_index = 0;
@@ -186,18 +183,6 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>,
             }
 
             tokens.push(Token::NumericLiteral(as_str(&bytes[start_index..end_index])));
-        } else if bytes[start_index] == b'"' || bytes[start_index] == b'\'' {
-            end_index = find_string_literal(&bytes, end_index, bytes[start_index]);
-
-            tokens.push(Token::StringLiteral(as_str(&bytes[start_index..end_index])));
-        } else if bytes[start_index] == b'/' && is_possible_expression {
-            end_index = find_regex_literal(&bytes, end_index);
-
-            tokens.push(Token::RegexLiteral(as_str(&bytes[start_index..end_index])));
-        } else if bytes[start_index] == b'`' {
-            end_index = find_template_string_literal(&bytes, end_index);
-
-            tokens.push(Token::TemplateLiteral(as_str(&bytes[start_index..end_index])));
         } else {
             let curr = bytes[start_index];
             let next = if end_index < bytes.len() {
@@ -405,7 +390,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 
         let content = as_str(&bytes[start_index..end_index]);
         if state == TokenizerType::Blackspace && !is_keyword(content) {
-            tokenize_blackspace(&mut tokens, content, start_index, is_possible_expression);
+            tokenize_blackspace(&mut tokens, content, start_index);
         } else {
             let token = match state {
                 TokenizerType::Blackspace => Token::Keyword(content),
@@ -453,7 +438,7 @@ mod bench {
 
     macro_rules! benchmark_tokenize_blackspace {
         ($name: ident, $toRun: expr) => (
-            _benchmark!($name, super::tokenize_blackspace(&mut Vec::new(), $toRun, 0, true));
+            _benchmark!($name, super::tokenize_blackspace(&mut Vec::new(), $toRun, 0));
         )
     }
 
