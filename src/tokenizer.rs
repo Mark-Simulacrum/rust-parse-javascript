@@ -248,11 +248,11 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
                 (b'|', _, _) => Token::BitwiseOr,
                 (b'^', _, _) => Token::BitwiseXOR,
                 _ => {
-                    panic!("Unknown Blackspace Token {}{:?}{:?} at {}",
+                    panic!("Unknown Blackspace Token: matched: {:?}, {:?}, {:?} at {}",
                            curr as char,
                            next,
                            next_next,
-                           position)
+                           position + start_index)
                 }
             };
 
