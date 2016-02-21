@@ -79,7 +79,8 @@ impl<'a> Token<'a> {
             Token::Colon |
             Token::QuestionMark |
             Token::Equal |
-            Token::ExclamationMark => true,
+            Token::ExclamationMark |
+            Token::UpdateAssignment(_) => true,
             _ => false,
         }
     }
