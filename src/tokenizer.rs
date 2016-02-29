@@ -25,23 +25,48 @@ impl TokenizerType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum Operator {
+    UnsignedRightShift,
+    RightShift,
+    LeftShift,
+    Exponeniation,
+    Add,
+    Subtract,
+    Modulo,
+    Divide,
+    Multiply,
+    BitwiseOr
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Relational {
+    Less,
+    Greater,
+    LessOrEqual,
+    GreaterOrEqual,
+    Equal,
+    NotEqual,
+    EqualStrict,
+    NotEqualStrict
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Token<'a> {
     Whitespace(&'a str),
     Shebang(&'a str),
-    Keyword(&'a str),
-    Identifier(&'a str),
-    NumericLiteral(&'a str),
-    StringLiteral(&'a str),
-    DeIncrement(&'a str),
-    RegexLiteral(&'a str),
-    Equality(&'a str),
-    BitShift(&'a str),
-    Relational(char),
-    PlusMin(char),
     LineComment(&'a str),
     BlockComment(&'a str),
+    NumericLiteral(&'a str),
+    StringLiteral(&'a str),
+    RegexLiteral(&'a str),
     TemplateLiteral(&'a str),
-    UpdateAssignment(&'a str),
+    Identifier(&'a str),
+    Keyword(&'a str),
+
+    DeIncrement(Operator),
+    BitShift(Operator),
+    Relational(Relational),
+    UpdateAssignment(Operator),
     Exponeniation,
     Arrow,
     Equal,
@@ -51,6 +76,8 @@ pub enum Token<'a> {
     BitwiseXOR,
     BitwiseAnd,
     BitwiseNot,
+    Plus,
+    Minus,
     Modulo,
     Star,
     Slash,
@@ -200,31 +227,31 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
             let token = match (curr, next, next_next) {
                 (b'>', Some(b'>'), Some(b'>')) if end_index + 2 < bytes.len() &&
                                                   bytes[end_index + 2] == b'=' => {
-                    Token::UpdateAssignment(">>>=")
+                    Token::UpdateAssignment(Operator::UnsignedRightShift)
                 }
-                (b'*', Some(b'*'), Some(b'=')) => Token::UpdateAssignment("**="),
-                (b'<', Some(b'<'), Some(b'=')) => Token::UpdateAssignment("<<="),
-                (b'>', Some(b'>'), Some(b'=')) => Token::UpdateAssignment(">>="),
-                (b'=', Some(b'='), Some(b'=')) => Token::Equality("==="),
-                (b'!', Some(b'='), Some(b'=')) => Token::Equality("!=="),
-                (b'=', Some(b'='), _) => Token::Equality("=="),
-                (b'<', Some(b'='), _) => Token::Equality("<="),
-                (b'>', Some(b'='), _) => Token::Equality(">="),
-                (b'!', Some(b'='), _) => Token::Equality("!="),
-                (b'+', Some(b'='), _) => Token::UpdateAssignment("+="),
-                (b'-', Some(b'='), _) => Token::UpdateAssignment("-="),
-                (b'+', Some(b'+'), _) => Token::DeIncrement("++"),
-                (b'-', Some(b'-'), _) => Token::DeIncrement("--"),
-                (b'<', Some(b'<'), _) => Token::BitShift("<<"),
-                (b'>', Some(b'>'), _) => Token::BitShift(">>"),
+                (b'*', Some(b'*'), Some(b'=')) => Token::UpdateAssignment(Operator::Exponeniation),
+                (b'<', Some(b'<'), Some(b'=')) => Token::UpdateAssignment(Operator::LeftShift),
+                (b'>', Some(b'>'), Some(b'=')) => Token::UpdateAssignment(Operator::RightShift),
+                (b'=', Some(b'='), Some(b'=')) => Token::Relational(Relational::EqualStrict),
+                (b'!', Some(b'='), Some(b'=')) => Token::Relational(Relational::NotEqualStrict),
+                (b'=', Some(b'='), _) => Token::Relational(Relational::Equal),
+                (b'<', Some(b'='), _) => Token::Relational(Relational::LessOrEqual),
+                (b'>', Some(b'='), _) => Token::Relational(Relational::GreaterOrEqual),
+                (b'!', Some(b'='), _) => Token::Relational(Relational::NotEqual),
+                (b'+', Some(b'='), _) => Token::UpdateAssignment(Operator::Add),
+                (b'-', Some(b'='), _) => Token::UpdateAssignment(Operator::Subtract),
+                (b'+', Some(b'+'), _) => Token::DeIncrement(Operator::Add),
+                (b'-', Some(b'-'), _) => Token::DeIncrement(Operator::Subtract),
+                (b'<', Some(b'<'), _) => Token::BitShift(Operator::LeftShift),
+                (b'>', Some(b'>'), _) => Token::BitShift(Operator::RightShift),
                 (b'*', Some(b'*'), _) => Token::Exponeniation,
                 (b'|', Some(b'|'), _) => Token::LogicalOr,
                 (b'&', Some(b'&'), _) => Token::LogicalAnd,
                 (b'=', Some(b'>'), _) => Token::Arrow,
-                (b'%', Some(b'='), _) => Token::UpdateAssignment("%="),
-                (b'/', Some(b'='), _) => Token::UpdateAssignment("/="),
-                (b'*', Some(b'='), _) => Token::UpdateAssignment("*="),
-                (b'|', Some(b'='), _) => Token::UpdateAssignment("|="),
+                (b'%', Some(b'='), _) => Token::UpdateAssignment(Operator::Modulo),
+                (b'/', Some(b'='), _) => Token::UpdateAssignment(Operator::Divide),
+                (b'*', Some(b'='), _) => Token::UpdateAssignment(Operator::Multiply),
+                (b'|', Some(b'='), _) => Token::UpdateAssignment(Operator::BitwiseOr),
                 (b'.', _, _) => Token::Dot,
                 (b'(', _, _) => Token::LeftParen,
                 (b')', _, _) => Token::RightParen,
@@ -233,8 +260,10 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
                 (b'[', _, _) => Token::LeftBracket,
                 (b']', _, _) => Token::RightBracket,
                 (b';', _, _) => Token::Semicolon,
-                (b'<', _, _) | (b'>', _, _) => Token::Relational(curr as char),
-                (b'+', _, _) | (b'-', _, _) => Token::PlusMin(curr as char),
+                (b'<', _, _) => Token::Relational(Relational::Less),
+                (b'>', _, _) => Token::Relational(Relational::Greater),
+                (b'+', _, _) => Token::Plus,
+                (b'-', _, _) => Token::Minus,
                 (b'=', _, _) => Token::Equal,
                 (b'*', _, _) => Token::Star,
                 (b'%', _, _) => Token::Modulo,
@@ -257,12 +286,15 @@ fn tokenize_blackspace<'a>(tokens: &mut Vec<Token<'a>>, input: &'a str, position
             };
 
             end_index += match token {
-                Token::UpdateAssignment("**=") |
-                Token::UpdateAssignment("<<=") |
-                Token::UpdateAssignment(">>=") |
-                Token::Equality("===") |
-                Token::Equality("!==") => 2,
-                Token::Equality(_) |
+                Token::UpdateAssignment(Operator::Exponeniation) |
+                Token::UpdateAssignment(Operator::RightShift) |
+                Token::UpdateAssignment(Operator::LeftShift) |
+                Token::Relational(Relational::EqualStrict) |
+                Token::Relational(Relational::NotEqualStrict) => 2,
+                Token::Relational(Relational::Equal) |
+                Token::Relational(Relational::NotEqual) |
+                Token::Relational(Relational::LessOrEqual) |
+                Token::Relational(Relational::GreaterOrEqual) |
                 Token::UpdateAssignment(_) |
                 Token::DeIncrement(_) |
                 Token::BitShift(_) |
@@ -409,7 +441,10 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         state = if state.is_greyspace() {
             TokenizerType::Blackspace
         } else {
-            is_possible_expression = last_item(&tokens).before_expression();
+            is_possible_expression = match tokens.last() {
+                Some(token) => token.before_expression(),
+                None => false
+            };
             TokenizerType::Whitespace
         };
 
@@ -474,7 +509,7 @@ mod bench {
 
 #[cfg(test)]
 mod tests {
-    use super::{tokenize, Token};
+    use super::*;
 
     #[test]
     fn tokenize_shebang() {
@@ -599,7 +634,7 @@ mod tests {
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
         assert_eq!(tokens.remove(0), Token::Identifier("a"));
         assert_eq!(tokens.remove(0), Token::Whitespace(" "));
-        assert_eq!(tokens.remove(0), Token::Equality("=="));
+        assert_eq!(tokens.remove(0), Token::Relational(Relational::Equal));
         assert_eq!(tokens.remove(0), Token::Whitespace(" "));
         assert_eq!(tokens.remove(0), Token::Identifier("b"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
