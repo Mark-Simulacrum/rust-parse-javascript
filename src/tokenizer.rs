@@ -1,5 +1,6 @@
 use std::str;
 use std::mem;
+use phf;
 use memchr;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -61,7 +62,7 @@ pub enum Token<'a> {
     RegexLiteral(&'a str),
     TemplateLiteral(&'a str),
     Identifier(&'a str),
-    Keyword(&'a str),
+    Keyword(Keyword),
 
     DeIncrement(Operator),
     BitShift(Operator),
@@ -126,6 +127,85 @@ impl<'a> Token<'a> {
 fn is_id(c: u8) -> bool {
     (c as char).is_alphabetic() || c == b'$' || c == b'_'
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Keyword {
+    Do,
+    If,
+    In,
+    Var,
+    For,
+    Let,
+    New,
+    Try,
+    Case,
+    Null,
+    This,
+    True,
+    Void,
+    With,
+    Break,
+    Class,
+    Const,
+    False,
+    Super,
+    Throw,
+    While,
+    Yield,
+    Delete,
+    Export,
+    Import,
+    Return,
+    Switch,
+    Typeof,
+    Default,
+    Extends,
+    Finally,
+    Continue,
+    Debugger,
+    Function,
+    Undefined,
+    Instanceof,
+}
+
+static KEYWORDS: phf::Map<&'static str, Keyword> = phf_map! {
+    "do" => Keyword::Do,
+    "if" => Keyword::If,
+    "in" => Keyword::In,
+    "var" => Keyword::Var,
+    "for" => Keyword::For,
+    "let" => Keyword::Let,
+    "new" => Keyword::New,
+    "try" => Keyword::Try,
+    "case" => Keyword::Case,
+    "null" => Keyword::Null,
+    "this" => Keyword::This,
+    "true" => Keyword::True,
+    "void" => Keyword::Void,
+    "with" => Keyword::With,
+    "break" => Keyword::Break,
+    "class" => Keyword::Class,
+    "const" => Keyword::Const,
+    "false" => Keyword::False,
+    "super" => Keyword::Super,
+    "throw" => Keyword::Throw,
+    "while" => Keyword::While,
+    "yield" => Keyword::Yield,
+    "delete" => Keyword::Delete,
+    "export" => Keyword::Export,
+    "import" => Keyword::Import,
+    "return" => Keyword::Return,
+    "switch" => Keyword::Switch,
+    "typeof" => Keyword::Typeof,
+    "default" => Keyword::Default,
+    "extends" => Keyword::Extends,
+    "finally" => Keyword::Finally,
+    "continue" => Keyword::Continue,
+    "debugger" => Keyword::Debugger,
+    "function" => Keyword::Function,
+    "undefined" => Keyword::Undefined,
+    "instanceof" => Keyword::Instanceof,
+};
 
 #[allow(cyclomatic_complexity)]
 fn is_keyword(s: &str) -> bool {
@@ -426,7 +506,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             tokenize_blackspace(&mut tokens, content, start_index);
         } else {
             let token = match state {
-                TokenizerType::Blackspace => Token::Keyword(content),
+                TokenizerType::Blackspace => Token::Keyword(KEYWORDS.get(content).cloned().unwrap()),
                 TokenizerType::Whitespace => Token::Whitespace(content),
                 TokenizerType::LineComment => Token::LineComment(content),
                 TokenizerType::BlockComment => Token::BlockComment(content),
@@ -672,7 +752,7 @@ mod tests {
         let mut tokens = tokenize(input);
         println!("{:?}", tokens);
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
-        assert_eq!(tokens.remove(0), Token::Keyword("function"));
+        assert_eq!(tokens.remove(0), Token::Keyword(Keyword::Function));
         assert_eq!(tokens.remove(0), Token::Whitespace(" "));
         assert_eq!(tokens.remove(0), Token::Identifier("test"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));
@@ -687,7 +767,7 @@ mod tests {
         assert_eq!(tokens.remove(0),
                    Token::BlockComment("/*\n             * testing\n             * multiline BlockComment\n             */"));
         assert_eq!(tokens.remove(0), Token::Whitespace("\n            "));
-        assert_eq!(tokens.remove(0), Token::Keyword("return"));
+        assert_eq!(tokens.remove(0), Token::Keyword(Keyword::Return));
         assert_eq!(tokens.remove(0), Token::Whitespace(" "));
         assert_eq!(tokens.remove(0), Token::Identifier("this"));
         assert_eq!(tokens.remove(0), Token::Whitespace(""));

@@ -2,9 +2,11 @@
 #![feature(plugin)]
 
 #![plugin(clippy)]
+#![plugin(phf_macros)]
 
 extern crate test;
 extern crate memchr;
+extern crate phf;
 
 use std::env;
 use std::fs::File;

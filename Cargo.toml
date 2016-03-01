@@ -6,6 +6,8 @@ version = "0.1.0"
 [dependencies]
 clippy = "0.0.44"
 memchr = "0.1.7"
+phf = "0.7.13"
+phf_macros = "0.7.13"
 
 [profile]
 
