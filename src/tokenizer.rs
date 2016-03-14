@@ -35,7 +35,7 @@ pub enum Operator {
     Modulo,
     Divide,
     Multiply,
-    BitwiseOr
+    BitwiseOr,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ pub enum Relational {
     Equal,
     NotEqual,
     EqualStrict,
-    NotEqualStrict
+    NotEqualStrict,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -443,7 +443,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
         } else {
             is_possible_expression = match tokens.last() {
                 Some(token) => token.before_expression(),
-                None => false
+                None => false,
             };
             TokenizerType::Whitespace
         };
